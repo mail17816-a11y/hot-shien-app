@@ -263,9 +263,7 @@ export default function App() {
       if (result.error) throw result.error;
     });
   }
-  const filteredRequests = requests.filter(
-    (r) => !selected || r.property_id === selected,
-  );
+  const filteredRequests = requests.filter((r) => r.property_id === selected);
   if (!ready)
     return (
       <main className="login">
@@ -436,7 +434,9 @@ export default function App() {
                 value={selected}
                 onChange={(e) => setSelected(e.target.value)}
               >
-                <option value="">すべての物件</option>
+                <option value="" disabled>
+                  物件を選択してください
+                </option>
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} — {p.address}
@@ -444,7 +444,12 @@ export default function App() {
                 ))}
               </select>
             </label>
-            {tab === "timeline" && (
+            {tab === "timeline" && !selected && (
+              <div className="empty">
+                物件を選択すると、報告・ご依頼・メッセージが表示されます。
+              </div>
+            )}
+            {tab === "timeline" && selected && (
               <Timeline
                 reports={reports}
                 requests={requests}
