@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase as db } from "./supabase";
+import RequestInbox from "./RequestInbox";
 import Timeline, {
   type Profile,
   type Property,
@@ -126,7 +127,7 @@ export default function App() {
     );
     if (version !== generation.current) return;
     setReports(hydrated);
-    if (p.data.role === "admin") {
+    if (p.data.role !== "customer") {
       const all = await db.from("profiles").select("*").order("name");
       if (version !== generation.current) return;
       if (all.error) throw all.error;
@@ -340,7 +341,12 @@ export default function App() {
         <nav>
           {[
             ["timeline", "コミュニケーション"],
-            ["requests", "追加作業の依頼"],
+            [
+              "requests",
+              profile?.role === "customer"
+                ? "追加作業の依頼"
+                : "作業・問い合わせ受付",
+            ],
             ...(profile?.role !== "customer"
               ? [["report", "作業報告を登録"]]
               : []),
@@ -379,7 +385,9 @@ export default function App() {
               {tab === "timeline"
                 ? "物件のコミュニケーション"
                 : tab === "requests"
-                  ? "追加作業の依頼"
+                  ? profile?.role === "customer"
+                    ? "追加作業の依頼"
+                    : "作業・問い合わせ受付"
                   : tab === "report"
                     ? "作業報告を登録"
                     : "物件・ユーザー管理"}
@@ -428,22 +436,24 @@ export default function App() {
                 </strong>
               </div>
             </section>
-            <label className="selector">
-              対象の物件
-              <select
-                value={selected}
-                onChange={(e) => setSelected(e.target.value)}
-              >
-                <option value="" disabled>
-                  物件を選択してください
-                </option>
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} — {p.address}
+            {!(tab === "requests" && profile.role !== "customer") && (
+              <label className="selector">
+                対象の物件
+                <select
+                  value={selected}
+                  onChange={(e) => setSelected(e.target.value)}
+                >
+                  <option value="" disabled>
+                    物件を選択してください
                   </option>
-                ))}
-              </select>
-            </label>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} — {p.address}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {tab === "timeline" && !selected && (
               <div className="empty">
                 物件を選択すると、報告・ご依頼・メッセージが表示されます。
@@ -516,7 +526,22 @@ export default function App() {
                 </form>
               </section>
             )}
-            {tab === "requests" && (
+            {tab === "requests" && profile.role !== "customer" && (
+              <RequestInbox
+                requests={requests}
+                messages={messages}
+                properties={properties}
+                people={people}
+                busy={busy}
+                messagesReady={messagesReady}
+                onStatus={changeStatus}
+                onOpen={(propertyId) => {
+                  setSelected(propertyId);
+                  setTab("timeline");
+                }}
+              />
+            )}
+            {tab === "requests" && profile.role === "customer" && (
               <section>
                 {profile.role === "customer" && (
                   <div className="panel">
@@ -579,30 +604,6 @@ export default function App() {
                       {properties.find((p) => p.id === r.property_id)?.name}
                     </h3>
                     <p className="body">{r.body}</p>
-                    {profile.role !== "customer" && (
-                      <label>
-                        対応状況
-                        <select
-                          value={r.status}
-                          disabled={busy}
-                          onChange={(e) =>
-                            action(async () => {
-                              const result = await db!
-                                .from("work_requests")
-                                .update({ status: e.target.value })
-                                .eq("id", r.id);
-                              if (result.error) throw result.error;
-                            })
-                          }
-                        >
-                          {["受付待ち", "受付済み", "作業中", "完了"].map(
-                            (s) => (
-                              <option key={s}>{s}</option>
-                            ),
-                          )}
-                        </select>
-                      </label>
-                    )}
                   </article>
                 ))}
               </section>

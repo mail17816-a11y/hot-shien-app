@@ -22,3 +22,17 @@ export function buildTimeline<
         `${a.type}:${a.data.id}`.localeCompare(`${b.type}:${b.data.id}`),
     );
 }
+
+export function buildInbox<
+  W extends TimelineSource,
+  M extends TimelineSource & { author_role: string },
+>(requests: W[], messages: M[]) {
+  return buildTimeline(
+    [],
+    requests,
+    messages.filter((message) => message.author_role === "customer"),
+    "",
+  )
+    .filter((entry) => entry.type !== "report")
+    .reverse();
+}

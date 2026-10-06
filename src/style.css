@@ -528,3 +528,75 @@ fieldset {
     flex-shrink: 0;
   }
 }
+.inbox-scroll {
+  overflow-x: auto;
+  border: 1px solid #dfe7de;
+  border-radius: 12px;
+  background: white;
+}
+.inbox-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+  min-width: 800px;
+}
+.inbox-table th {
+  background: #edf2eb;
+  color: #526c59;
+  font-weight: 600;
+  padding: 13px 12px;
+  white-space: nowrap;
+}
+.inbox-table td {
+  padding: 13px 12px;
+  border-top: 1px solid #e5eae2;
+  vertical-align: top;
+}
+.inbox-table td:first-child {
+  min-width: 120px;
+}
+.inbox-table td:nth-child(2),
+.inbox-table td:nth-child(3) {
+  min-width: 90px;
+  overflow-wrap: anywhere;
+}
+.inbox-table td:nth-child(4) {
+  min-width: 110px;
+}
+.inbox-table td:nth-child(5) {
+  width: 35%;
+  min-width: 180px;
+}
+.inbox-table select {
+  min-width: 100px;
+  padding: 7px;
+  font-size: 12px;
+}
+.inbox-table button {
+  white-space: nowrap;
+}
+.inbox-body {
+  font-size: 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.inbox-table tbody tr:hover {
+  background: #f8faf6;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
