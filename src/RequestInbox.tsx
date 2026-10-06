@@ -56,8 +56,8 @@ export default function RequestInbox({
             <thead>
               <tr>
                 <th scope="col">日時</th>
-                <th scope="col">顧客</th>
-                <th scope="col">物件</th>
+                <th scope="col">顧客番号</th>
+                <th scope="col">物件番号</th>
                 <th scope="col">種類</th>
                 <th scope="col">内容</th>
                 <th scope="col">対応状況</th>
@@ -72,9 +72,8 @@ export default function RequestInbox({
                     ? entry.data.customer_id
                     : entry.data.author_id;
                 const customerName =
-                  people.find((person) => person.id === customerId)?.name ||
-                  (entry.type === "message" ? entry.data.author_name : "") ||
-                  "顧客";
+                  people.find((person) => person.id === customerId)
+                    ?.customer_number || "顧客";
                 const property = properties.find(
                   (property) => property.id === row.property_id,
                 );
@@ -86,7 +85,7 @@ export default function RequestInbox({
                       </time>
                     </td>
                     <td>{customerName}</td>
-                    <td>{property?.name || "物件"}</td>
+                    <td>{property?.property_number || "物件"}</td>
                     <td>
                       {entry.type === "request"
                         ? `作業依頼 · ${row.kind}`
@@ -100,7 +99,7 @@ export default function RequestInbox({
                     <td>
                       {entry.type === "request" ? (
                         <select
-                          aria-label={`${customerName}・${property?.name || "物件"}・${formatDate(row.created_at)}の対応状況`}
+                          aria-label={`${customerName}・${property?.property_number || "物件"}・${formatDate(row.created_at)}の対応状況`}
                           value={entry.data.status}
                           disabled={busy}
                           onChange={(event) =>
@@ -121,7 +120,7 @@ export default function RequestInbox({
                       <button
                         className="quiet"
                         onClick={() => onOpen(row.property_id)}
-                        aria-label={`${customerName}・${property?.name || "物件"}のコミュニケーションを開く`}
+                        aria-label={`${customerName}・${property?.property_number || "物件"}のコミュニケーションを開く`}
                       >
                         開く
                       </button>

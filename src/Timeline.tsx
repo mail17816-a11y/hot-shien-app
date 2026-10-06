@@ -3,14 +3,14 @@ import { buildTimeline } from "./feed";
 
 export type Profile = {
   id: string;
-  name: string;
+  login_id: string;
+  customer_number: string | null;
   role: "admin" | "worker" | "customer";
   active: boolean;
 };
 export type Property = {
   id: string;
-  name: string;
-  address: string;
+  property_number: string;
   customer_id: string;
 };
 export type Report = {
@@ -38,7 +38,6 @@ export type Message = {
   property_id: string;
   author_id: string;
   author_role: Profile["role"];
-  author_name: string;
   kind: string;
   body: string;
   created_at: string;
@@ -130,7 +129,7 @@ export default function Timeline({
               : entry.data.author_id === profile.id;
           const sender =
             entry.type === "message"
-              ? `${entry.data.author_name || roles[entry.data.author_role]} · ${roles[entry.data.author_role]}`
+              ? `${roles[entry.data.author_role]}`
               : own
                 ? "あなた"
                 : entry.type === "request"
@@ -154,8 +153,8 @@ export default function Timeline({
                 </div>
                 {!selected && (
                   <h3>
-                    {properties.find((p) => p.id === r.property_id)?.name ||
-                      "物件"}
+                    {properties.find((p) => p.id === r.property_id)
+                      ?.property_number || "物件"}
                   </h3>
                 )}
                 {entry.type === "report" && (
@@ -209,7 +208,7 @@ export default function Timeline({
         <h2>投稿する</h2>
         <p className="muted">
           {selected
-            ? `${properties.find((p) => p.id === selected)?.name || "選択中の物件"}について投稿します。`
+            ? `${properties.find((p) => p.id === selected)?.property_number || "選択中の物件"}について投稿します。`
             : "上の一覧から投稿先の物件を選択してください。"}
         </p>
         {!messagesReady && (

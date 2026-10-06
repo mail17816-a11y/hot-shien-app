@@ -8,18 +8,18 @@ Node.js 22.12以上で、`npm ci` を実行します。`.env.example` を `.env.
 
 ## Supabase初期設定
 
-1. SQL Editorで `supabase/migrations/001_initial.sql` を初回のみ実行。既存の同名テーブルがある場合は実行前に確認してください。
+1. 新規DBではSQL Editorで `supabase/migrations/001_initial.sql` → `002_property_messages.sql` → `003_identifier_only.sql` の順に一度ずつ実行します。001/002は移行履歴として残した旧設計です。既存DBには未適用の追加SQLだけを適用します。003の実行前は [番号管理への移行手順](docs/identifier-migration.md) を確認してください。
 2. Authenticationの公開サインアップを無効化し、Users画面から管理者・作業者・顧客のアカウントを作成します。
-3. SQL Editorで次の例のメールアドレスを置き換えて、管理者と作業者の役割を設定します。顧客の初期役割はcustomerです。ユーザー自身による役割変更は許可していません。
+3. SQL Editorで次の例のメールアドレスを置き換えて、管理者と作業者の役割を設定します。ログインIDを `指定ID@example.com` として確認済みで発行します。顧客番号はそのIDの大文字表記です。顧客の初期役割はcustomerです。ユーザー自身による役割変更は許可していません。
 
 ```sql
-update public.profiles set role='admin', name='管理者'
+update public.profiles set role='admin', customer_number=null
 where id=(select id from auth.users where email='admin@example.com');
-update public.profiles set role='worker', name='作業者'
+update public.profiles set role='worker', customer_number=null
 where id=(select id from auth.users where email='worker@example.com');
 ```
 
-4. 管理者としてログインし、顧客に紐付けた物件を登録します。
+4. 管理者としてログインし、顧客番号を選び、物件番号を入力して登録します。顧客番号・指定した物件番号をローカル台帳へ控えます。氏名・住所はアプリやAuthのメタデータへ入力しません。
 5. 作業者から写真付き報告を登録。顧客で閲覧・追加作業依頼、作業者で受付状況変更を確認します。
 
 ## Vercel
@@ -37,7 +37,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=（受け取った公開キー）
 
 ### コミュニケーション画面の追加設定
 
-既存のプロジェクトでは `supabase/migrations/002_property_messages.sql` をSQL Editorで実行してください。001は再実行不要です。追加SQLは既存データを保持し、再実行も可能です。新規プロジェクトでは001→002の順で実行します。
+002はメッセージ機能を追加した旧移行です。番号管理への003適用後に001/002を再実行しないでください。最新アプリは003の適用が必要です。
 
 物件のコミュニケーション画面は、報告・作業依頼・お問い合わせ・その他メッセージを登録日時順（最新が一番下）に表示します。報告の作業日は別途表示されます。投稿先の物件を選ぶと、顧客はお問い合わせ・その他メッセージ・作業依頼、作業者と管理者はその他メッセージを送信できます。依頼の状態は作業者・管理者が同じ画面で変更できます。
 
@@ -47,7 +47,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=（受け取った公開キー）
 
 `npm test` で投稿の並び順とPostgreSQLのアクセス制限を検証します（テスト実行はNode.js 24以上）。ローカルテストはSupabaseの認証IDとStorageスキーマを模したPostgreSQLを使用し、実プロジェクトへの設定適用は別途必要です。
 
-- パスワードログイン、役割別画面、管理者による物件登録とアカウント停止。
+- ログインID＋パスワード認証（内部メールはexample.com）、役割別画面、管理者による物件登録とアカウント停止。
 - 巡回／維持作業／郵便物対応の報告、非公開の写真保存、顧客のタイムライン。
 - 顧客による追加作業依頼、作業者による状態変更。
 - アカウント発行と役割設定はSupabase管理画面。請求、契約変更、データ一括取得、告知、アプリからのユーザー削除・バックアップは未実装。
