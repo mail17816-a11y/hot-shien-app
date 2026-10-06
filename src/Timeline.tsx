@@ -3,6 +3,7 @@ import { buildTimeline } from "./feed";
 
 export type Profile = {
   id: string;
+  login_id: string;
   customer_number: string | null;
   role: "admin" | "worker" | "customer";
   active: boolean;

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase as db } from "./supabase";
+import { loginEmail, normalizePropertyNumber } from "./login";
 import RequestInbox from "./RequestInbox";
 import Timeline, {
   type Profile,
@@ -168,7 +169,7 @@ export default function App() {
     const f = new FormData(e.currentTarget);
     await action(async () => {
       const r = await db!.auth.signInWithPassword({
-        email: String(f.get("email")),
+        email: loginEmail(String(f.get("login_id"))),
         password: String(f.get("password")),
       });
       if (r.error) throw r.error;
@@ -304,10 +305,13 @@ export default function App() {
           ) : (
             <form onSubmit={login}>
               <label>
-                メールアドレス
+                ログインID
                 <input
-                  name="email"
-                  type="email"
+                  name="login_id"
+                  type="text"
+                  maxLength={32}
+                  autoCapitalize="none"
+                  spellCheck={false}
                   autoComplete="username"
                   required
                 />
@@ -369,7 +373,7 @@ export default function App() {
         <div className="account">
           <b>
             {profile
-              ? profile.customer_number || roles[profile.role]
+              ? profile.customer_number || profile.login_id
               : "アカウント"}
           </b>
           <small>{profile && roles[profile.role]}</small>
@@ -629,6 +633,9 @@ export default function App() {
                     action(async () => {
                       const r = await db!.from("properties").insert({
                         customer_id: f.get("customer"),
+                        property_number: normalizePropertyNumber(
+                          String(f.get("property_number")),
+                        ),
                       });
                       if (r.error) throw r.error;
                       form.reset();
@@ -636,8 +643,12 @@ export default function App() {
                   }}
                 >
                   <p className="muted">
-                    氏名・住所はローカル台帳で管理します。物件番号は登録時に自動発行します。
+                    氏名・住所はローカル台帳で管理します。台帳に対応する物件番号を指定してください。
                   </p>
+                  <label>
+                    物件番号
+                    <input name="property_number" maxLength={64} required />
+                  </label>
                   <label>
                     契約者の顧客番号
                     <select name="customer" required>
@@ -646,7 +657,7 @@ export default function App() {
                         .filter((p) => p.role === "customer" && p.active)
                         .map((p) => (
                           <option value={p.id} key={p.id}>
-                            {p.customer_number || roles[p.role]}
+                            {p.customer_number || p.login_id}
                           </option>
                         ))}
                     </select>
@@ -660,7 +671,7 @@ export default function App() {
                 {people.map((p) => (
                   <div className="person" key={p.id}>
                     <div>
-                      <b>{p.customer_number || roles[p.role]}</b>
+                      <b>{p.customer_number || p.login_id}</b>
                       <small>
                         {roles[p.role]} · {p.active ? "利用中" : "停止中"}
                       </small>

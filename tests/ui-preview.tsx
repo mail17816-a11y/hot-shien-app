@@ -49,6 +49,7 @@ function Preview() {
   ]);
   const profile: Profile = {
     id: role,
+    login_id: role,
     customer_number: role === "customer" ? "C000001" : null,
     role,
     active: true,

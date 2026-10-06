@@ -49,8 +49,20 @@ function Preview() {
     },
   ];
   const people: Profile[] = [
-    { id: "a", customer_number: "C000001", role: "customer", active: true },
-    { id: "b", customer_number: "C000002", role: "customer", active: true },
+    {
+      id: "a",
+      login_id: "c000001",
+      customer_number: "C000001",
+      role: "customer",
+      active: true,
+    },
+    {
+      id: "b",
+      login_id: "c000002",
+      customer_number: "C000002",
+      role: "customer",
+      active: true,
+    },
   ];
   return (
     <main className="content">

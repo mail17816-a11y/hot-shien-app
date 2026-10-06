@@ -96,7 +96,7 @@ test("番号管理への移行で個人情報列を除去し、既存データ�
             "select customer_number from public.profiles where role='customer' order by id",
           )
         ).rows.map((r) => r.customer_number),
-        ["C000001", "C000002"],
+        ["A", "B"],
       );
       assert.deepEqual(
         (
@@ -104,7 +104,10 @@ test("番号管理への移行で個人情報列を除去し、既存データ�
             "select property_number from public.properties order by id",
           )
         ).rows.map((r) => r.property_number),
-        ["P000001", "P000002"],
+        [
+          "LEGACY-" + a.replaceAll("-", "").toUpperCase(),
+          "LEGACY-" + b.replaceAll("-", "").toUpperCase(),
+        ],
       );
     });
     await t.test(
@@ -136,7 +139,7 @@ test("番号管理への移行で個人情報列を除去し、既存データ�
             (
               await db.query("select property_number from public.properties")
             ).rows.map((r) => r.property_number),
-            ["P000001"],
+            ["LEGACY-" + a.replaceAll("-", "").toUpperCase()],
           );
           for (const table of ["reports", "work_requests", "property_messages"])
             assert.equal(
@@ -153,7 +156,7 @@ test("番号管理への移行で個人情報列を除去し、既存データ�
             (
               await db.query("select property_number from public.properties")
             ).rows.map((r) => r.property_number),
-            ["P000002"],
+            ["LEGACY-" + b.replaceAll("-", "").toUpperCase()],
           );
           for (const table of ["reports", "work_requests", "property_messages"])
             assert.equal(
@@ -167,47 +170,73 @@ test("番号管理への移行で個人情報列を除去し、既存データ�
         });
       },
     );
-    await t.test("新しい顧客を名前の転記なしで採番する", async () => {
-      const id = "00000000-0000-0000-0000-000000000005";
-      await db.query(
-        "insert into auth.users(id,email,raw_user_meta_data) values($1,'new@example.com',$2)",
-        [id, { name: "転記しないテスト名" }],
-      );
-      const p = (
-        await db.query("select * from public.profiles where id=$1", [id])
-      ).rows[0];
-      assert.equal(p.customer_number, "C000003");
-      assert.ok(!("name" in p));
-    });
     await t.test(
-      "管理者は物件番号を自動発行して登録でき、顧客は登録できない",
+      "管理者が指定したログインIDから顧客番号を登録する",
+      async () => {
+        const id = "00000000-0000-0000-0000-000000000005";
+        await db.query(
+          "insert into auth.users(id,email,raw_user_meta_data) values($1,'new@example.com',$2)",
+          [id, { name: "転記しないテスト名" }],
+        );
+        const p = (
+          await db.query("select * from public.profiles where id=$1", [id])
+        ).rows[0];
+        assert.equal(p.customer_number, "NEW");
+        assert.equal(p.login_id, "new");
+        assert.deepEqual(
+          (
+            await db.query(
+              "select raw_user_meta_data from auth.users where id=$1",
+              [id],
+            )
+          ).rows[0].raw_user_meta_data,
+          {},
+        );
+        assert.ok(!("name" in p));
+      },
+    );
+    await t.test(
+      "管理者が自由な物件番号を指定でき、顧客の登録や重複は拒否する",
       async () => {
         await asUser(users.admin, async () => {
           const row = (
             await db.query(
-              "insert into public.properties(customer_id) values($1) returning *",
+              "insert into public.properties(customer_id,property_number) values($1,'HOUSE_42') returning *",
               [users.a],
             )
           ).rows[0];
-          assert.equal(row.property_number, "P000003");
+          assert.equal(row.property_number, "HOUSE_42");
           assert.ok(!("address" in row));
         });
         await assert.rejects(
           asUser(users.a, () =>
-            db.query("insert into public.properties(customer_id) values($1)", [
-              users.a,
-            ]),
+            db.query(
+              "insert into public.properties(customer_id,property_number) values($1,'HOUSE_43')",
+              [users.a],
+            ),
           ),
           /row-level security/,
         );
         await assert.rejects(
-          asUser(users.admin, () =>
-            db.query(
-              "insert into public.properties(customer_id,property_number) values($1,'P999999')",
+          asUser(users.admin, async () => {
+            await db.query(
+              "insert into public.properties(customer_id,property_number) values($1,'DUPLICATE')",
               [users.a],
-            ),
+            );
+            await db.query(
+              "insert into public.properties(customer_id,property_number) values($1,'DUPLICATE')",
+              [users.a],
+            );
+          }),
+          /unique constraint/,
+        );
+        await assert.rejects(
+          asUser(users.admin, () =>
+            db.query("insert into public.properties(customer_id) values($1)", [
+              users.a,
+            ]),
           ),
-          /permission denied/,
+          /not-null constraint/,
         );
       },
     );
@@ -244,39 +273,44 @@ test("番号管理への移行で個人情報列を除去し、既存データ�
         );
       },
     );
-    await t.test("採番が6桁を超えても番号を切り詰めない", async () => {
-      await db.exec(
-        "select setval('public.customer_number_seq',999999,false); select setval('public.property_number_seq',999999,false);",
-      );
-      for (const [id, expected] of [
-        ["00000000-0000-0000-0000-000000000006", "C999999"],
-        ["00000000-0000-0000-0000-000000000007", "C1000000"],
-      ]) {
-        await db.query("insert into auth.users(id,email) values($1,$2)", [
-          id,
-          `${expected}@example.com`,
-        ]);
-        assert.equal(
+    await t.test(
+      "Authはexample.com専用に制限し、既存ログインIDの変更と名前メタデータの保存を防ぐ",
+      async () => {
+        assert.ok(
           (
-            await db.query(
-              "select customer_number from public.profiles where id=$1",
-              [id],
-            )
-          ).rows[0].customer_number,
-          expected,
+            await db.query("select raw_user_meta_data from auth.users")
+          ).rows.every(
+            (row) => Object.keys(row.raw_user_meta_data).length === 0,
+          ),
         );
-      }
-      for (const expected of ["P999999", "P1000000"])
-        assert.equal(
+        await assert.rejects(
+          db.query(
+            "insert into auth.users(id,email) values('00000000-0000-0000-0000-000000000006','person@other.test')",
+          ),
+          /認証メール/,
+        );
+        await assert.rejects(
+          db.query(
+            "update auth.users set email='changed@example.com' where id=$1",
+            [users.a],
+          ),
+          /発行済み/,
+        );
+        await db.query(
+          "update auth.users set raw_user_meta_data=$1 where id=$2",
+          [{ name: "保存しない名前" }, users.a],
+        );
+        assert.deepEqual(
           (
             await db.query(
-              "insert into public.properties(customer_id) values($1) returning property_number",
+              "select raw_user_meta_data from auth.users where id=$1",
               [users.a],
             )
-          ).rows[0].property_number,
-          expected,
+          ).rows[0].raw_user_meta_data,
+          {},
         );
-    });
+      },
+    );
   } finally {
     await db.close();
   }

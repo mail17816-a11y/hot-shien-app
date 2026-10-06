@@ -1,57 +1,86 @@
-# 顧客・物件を番号で管理するDB設計
+# 番号管理とexample.comのログインID
 
-クラウド側には氏名・住所・自由な物件名を保存する列を設けません。ローカル台帳は顧客番号を主キーとして氏名・住所を管理し、物件番号に物件の所在地や詳細を紐付けます。台帳ファイルをGitHubやSupabase、Google Driveへアップロードしないでください。
+## 最終設計
 
-| クラウドの表 | 保存する識別情報 |
+| 項目 | 管理方法 |
 | --- | --- |
-| profiles | 認証UUID、顧客番号（顧客のみ）、役割、利用停止状態 |
-| properties | 物件UUID、物件番号、契約者の認証UUID、作成日時 |
-| reports | 物件UUID、作業者の認証UUID、作業種別・日付・本文・写真パス |
-| work_requests | 物件UUID、顧客の認証UUID、依頼種別・本文・対応状況 |
-| property_messages | 物件UUID、投稿者の認証UUID・役割、種別・本文・投稿日時 |
+| ログインID | 管理者が指定。全役割で重複不可、大文字小文字は区別しない |
+| 内部認証メール | 小文字のログインID＋`@example.com`。実際のメール送信は使わない |
+| 顧客番号 | 顧客のログインIDを大文字表記したもの。UUIDでAuthに紐付ける |
+| 管理者・作業者 | 顧客番号を持たず、個別のログインIDを使う |
+| 物件番号 | 管理者が入力。自動採番しない。重複不可、大文字で保存 |
+| 既存物件の移行 | `LEGACY-`＋UUIDのハイフンを除いた文字列を暫定番号として付与 |
 
-顧客番号は `C000001`、物件番号は `P000001` 形式でDBが採番します。内部UUIDは外部キーとRLSでの本人照合に残します。画面には顧客番号・物件番号を表示し、スタッフの実名は扱いません。顧客のアカウントはSupabase管理画面で作成し、発行された顧客番号をローカル台帳へ記入します。契約変更・アカウント登録・再設定の本人確認は電話／書面で行います。
+採番の接頭辞・連番形式は未決定です。技術上の入力制約だけを設けます。ログインIDは32文字以内、物件番号は64文字以内の半角英数字・ハイフン・アンダースコア（先頭は英数字）。同じIDを複数役割で共有しません。発行後のID変更・番号再利用は運用で禁止します。過去の物件番号もレコードを削除せず保持します。
 
-## 既存DBの移行
+業務DBの `profiles` は認証UUID、login_id、customer_number、role、activeを保存します。`properties` は物件UUID、property_number、契約者の認証UUID、作成日時を保存します。氏名・住所・自由な物件名・投稿者名の列は削除します。報告・依頼・メッセージ・写真との外部キーは維持します。
 
-`003_identifier_only.sql` は氏名・住所・投稿者名の列を削除するため、列の値は通常のSQL操作では復元できません。クラウドの過去バックアップや認証情報まで削除するSQLではありません。
+氏名・住所・連絡先・所在地はローカル台帳に保存し、クラウドにアップロードしません。顧客番号をローカル台帳の主キーに、物件番号を物件情報との照合に使います。
 
-1. 作業中は登録・アカウント作成を止めてください。
-2. 必要な場合は次の照合表をSQL Editorで確認し、台帳用PCなどのローカルにだけ控えます。これは個人情報を含むのでチャット・GitHub・Driveへ貼り付けないでください。テストデータだけなら控えは不要です。
+## アカウントの発行
 
-```sql
--- 移行で付与される顧客番号と旧氏名の対応
-select id as auth_user_id,
-       'C' || lpad(row_number() over(order by id)::text,6,'0') as customer_number,
-       name as old_name
-from public.profiles where role='customer' order by id;
+SupabaseのAuthenticationで公開サインアップを無効にし、メール／パスワード方式だけを使用します。電話・SNS認証・メール招待・メールリセットは使いません。
 
--- 移行で付与される物件番号と旧物件情報の対応
-with customers as (
- select id, 'C' || lpad(row_number() over(order by id)::text,6,'0') as customer_number
- from public.profiles where role='customer'
-)
-select p.id as property_id,
-       'P' || lpad(row_number() over(order by p.id)::text,6,'0') as property_number,
-       c.customer_number,p.name as old_property_name,p.address as old_address
-from public.properties p left join customers c on c.id=p.customer_id order by p.id;
-```
+管理者がUsers → Create new userで `指定ID@example.com` と個別のパスワードを入力し、Auto Confirm Userを選びます。DBはこのIDをプロフィールへ登録します。顧客番号や物件番号の連番を自動で生成する処理はありません。
 
-3. `001` と `002` が適用済みのプロジェクトに `003_identifier_only.sql` を一度だけ実行します。番号対応表の確認後に新しい顧客や物件を追加した場合、対応表を再確認してください。
-4. 番号対応版のアプリをデプロイし、新しいデプロイのVisitから開きます。旧アプリは氏名・住所の列を使うため、移行とアプリ更新の間は利用できません。
-5. 顧客A/Bの閲覧分離、物件登録、報告・依頼・メッセージの表示を確認します。顧客番号の変更はローカル台帳との照合を伴うため、一般ユーザーに更新権限を与えていません。
-
-管理者・作業者へ役割を変える場合の例（氏名は登録しません）：
+新規ユーザーの初期役割はcustomerです。管理者・作業者にする場合は、以下の例のように役割変更とcustomer_numberの解除を同じSQLで行います。
 
 ```sql
 update public.profiles set role='worker',customer_number=null
 where id=(select id from auth.users where email='worker-a@example.com');
 ```
 
-## 今回の対象外と残る情報
+管理者はroleをadminにします。Webの物件登録画面では、契約者の顧客番号を選び、ローカル台帳と一致する物件番号を手入力します。
 
-写真・報告本文・依頼本文・メッセージ本文は運用側で検討するため変更していません。これらに記載済みの個人情報は別途確認が必要です。
+## 未適用の003を適用する手順
 
-Supabase Authのメールアドレス、ユーザーメタデータ、外部認証情報もこの移行では変更しません。実在するメールアドレスや名前をAuthに登録した場合はクラウドに残ります。氏名や住所のメタデータを登録せず、番号を使うログイン方式・Auth情報の整理は次の対応として扱います。DBの列削除はSupabaseの既存バックアップ・ログの消去を意味しません。
+この003は以前の「自動採番版003」を置き換えたものです。旧版003が未実行のDB専用です。001/002を再実行しないでください。
 
-請求・決済のデータ構造は今回追加していません。今後は顧客番号を参照し、料金案内・決済経路・手動での入金登録を実装します。
+003は旧氏名・住所・投稿者名の列とAuthのユーザーメタデータを削除します。必要な情報は事前にローカルで控えてください。通常のSQL操作で削除した内容を復元することはできません。作業中は利用とユーザー／物件の追加を止めます。
+
+1. 既存アカウントに割り当てるログインIDを決めます。現在のメールが `有効なID@example.com` ならそのIDを継続使用できます。別の実メールやIDへ変える場合は、SQL適用前に下記スクリプトでAuthのAdmin APIを使用して変更します。アカウントの作り直しやauth.users.emailの直接SQL更新はしません。UUIDとパスワードは維持します。
+2. 新しいメールが未確認なら、Admin APIのemail_confirm、または管理画面で確認済みにします。
+3. 下記の対応表を必要に応じてローカル台帳へ控えます。個人情報を含むためチャット・GitHub・Driveへ貼り付けません。テストデータだけなら控えは不要です。
+
+```sql
+select p.id as auth_user_id,lower(split_part(u.email,'@',1)) as login_id,
+ case when p.role='customer' then upper(split_part(u.email,'@',1)) end as customer_number,
+ p.name as old_name,p.role
+from public.profiles p join auth.users u on u.id=p.id order by p.id;
+
+select p.id as property_id,
+ 'LEGACY-' || upper(replace(p.id::text,'-','')) as property_number,
+ upper(split_part(u.email,'@',1)) as customer_number,
+ p.name as old_property_name,p.address as old_address
+from public.properties p join auth.users u on u.id=p.customer_id order by p.id;
+```
+
+4. 更新版 `supabase/migrations/003_identifier_only.sql` を一度だけ実行します。example.com形式ではないメールが存在する場合は、個人情報列の削除前にエラーで停止し、変更はロールバックされます。Authの氏名・住所を含みうるuser_metadataも空にします。
+5. 更新版アプリを公開します。旧アプリは削除された列を使うため、この間は利用できません。
+6. ログインID＋従来のパスワードでログインし、番号表示・物件登録・報告や投稿・顧客間の閲覧分離を確認します。
+
+003適用後はDBトリガーでexample.com以外の認証メールと既存ログインIDの変更を拒否します。ユーザーメタデータは常に空へ戻します。メール形式のAuth識別子はクラウドに残りますが、実際の顧客メールを保存しません。
+
+## 既存認証メールの変更用スクリプト
+
+`node scripts/set-login-identifiers.mjs 対応表.json` は確認だけです。`--apply` を付けた場合だけAdmin APIへ更新します。実行環境はNode.js 24以上です。対応表には既存ユーザーUUIDと指定するlogin_idだけを記載します。
+
+```json
+[
+ {"user_id":"既存ユーザーのUUID","login_id":"C000001"},
+ {"user_id":"既存作業者のUUID","login_id":"worker-a"}
+]
+```
+
+変更時には `SUPABASE_URL` とサーバー専用の `SUPABASE_SECRET_KEY` をローカル環境変数で設定します。キーはチャットやGitHubへ貼らず、ブラウザ公開変数（VITE_）にも設定しません。このスクリプトはブラウザで使いません。
+
+```text
+node scripts/set-login-identifiers.mjs 対応表.json
+node scripts/set-login-identifiers.mjs 対応表.json --apply
+```
+
+更新はユーザーごとに行います。途中でエラーになったら、完了したUUIDの出力を確認し、重複するIDを修正して再実行します。003適用後のログインID変更用途には使えません。パスワードの再設定は電話／書面で本人確認した管理者が別途行います。管理者側のアカウント発行画面は今回実装せず、当面はSupabase管理画面を使用します。
+
+## 今回変更しない情報
+
+写真と自由記述は運用側で検討するため保持します。過去のバックアップ・ログ・外部認証のidentity_dataはこのSQLでは消去しません。外部認証を使った履歴がある場合、その個人情報は別途確認が必要です。請求・決済のデータ構造は次の実装範囲です。
