@@ -81,7 +81,7 @@ export default function App() {
       );
     setProfile(p.data);
     const [a, b, c, m] = await Promise.all([
-      db.from("properties").select("*").order("name"),
+      db.from("properties").select("*").order("property_number"),
       db
         .from("reports")
         .select("*")
@@ -128,7 +128,10 @@ export default function App() {
     if (version !== generation.current) return;
     setReports(hydrated);
     if (p.data.role !== "customer") {
-      const all = await db.from("profiles").select("*").order("name");
+      const all = await db
+        .from("profiles")
+        .select("*")
+        .order("customer_number");
       if (version !== generation.current) return;
       if (all.error) throw all.error;
       setPeople(all.data);
@@ -364,7 +367,11 @@ export default function App() {
           ))}
         </nav>
         <div className="account">
-          <b>{profile?.name || session.user.email}</b>
+          <b>
+            {profile
+              ? profile.customer_number || roles[profile.role]
+              : "アカウント"}
+          </b>
           <small>{profile && roles[profile.role]}</small>
           <button
             className="quiet"
@@ -448,7 +455,7 @@ export default function App() {
                   </option>
                   {properties.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} — {p.address}
+                      {p.property_number}
                     </option>
                   ))}
                 </select>
@@ -601,7 +608,10 @@ export default function App() {
                     </div>
                     <h3>
                       {r.kind} ·{" "}
-                      {properties.find((p) => p.id === r.property_id)?.name}
+                      {
+                        properties.find((p) => p.id === r.property_id)
+                          ?.property_number
+                      }
                     </h3>
                     <p className="body">{r.body}</p>
                   </article>
@@ -618,8 +628,6 @@ export default function App() {
                       f = new FormData(form);
                     action(async () => {
                       const r = await db!.from("properties").insert({
-                        name: f.get("name"),
-                        address: f.get("address"),
                         customer_id: f.get("customer"),
                       });
                       if (r.error) throw r.error;
@@ -627,23 +635,18 @@ export default function App() {
                     });
                   }}
                 >
+                  <p className="muted">
+                    氏名・住所はローカル台帳で管理します。物件番号は登録時に自動発行します。
+                  </p>
                   <label>
-                    物件名
-                    <input name="name" maxLength={200} required />
-                  </label>
-                  <label>
-                    住所
-                    <input name="address" maxLength={500} required />
-                  </label>
-                  <label>
-                    契約者
+                    契約者の顧客番号
                     <select name="customer" required>
                       <option value="">顧客を選択</option>
                       {people
                         .filter((p) => p.role === "customer" && p.active)
                         .map((p) => (
                           <option value={p.id} key={p.id}>
-                            {p.name}
+                            {p.customer_number || roles[p.role]}
                           </option>
                         ))}
                     </select>
@@ -657,7 +660,7 @@ export default function App() {
                 {people.map((p) => (
                   <div className="person" key={p.id}>
                     <div>
-                      <b>{p.name}</b>
+                      <b>{p.customer_number || roles[p.role]}</b>
                       <small>
                         {roles[p.role]} · {p.active ? "利用中" : "停止中"}
                       </small>

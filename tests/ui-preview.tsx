@@ -9,8 +9,7 @@ import Timeline, {
 import "../src/style.css";
 const property = {
   id: "a",
-  name: "サンプル物件",
-  address: "テスト用住所",
+  property_number: "P000001",
   customer_id: "customer",
 };
 function Preview() {
@@ -21,7 +20,7 @@ function Preview() {
       property_id: "a",
       author_id: "customer",
       author_role: "customer",
-      author_name: "顧客A",
+
       kind: "お問い合わせ",
       body: "玄関前の雑草の様子を教えていただけますか？",
       created_at: "2026-10-06T02:00:00Z",
@@ -31,7 +30,7 @@ function Preview() {
       property_id: "a",
       author_id: "worker",
       author_role: "worker",
-      author_name: "作業者A",
+
       kind: "その他メッセージ",
       body: "次回の巡回時に確認して、写真でご報告します。",
       created_at: "2026-10-06T03:00:00Z",
@@ -50,7 +49,7 @@ function Preview() {
   ]);
   const profile: Profile = {
     id: role,
-    name: role === "customer" ? "顧客A" : "作業者A",
+    customer_number: role === "customer" ? "C000001" : null,
     role,
     active: true,
   };
@@ -111,7 +110,7 @@ function Preview() {
                 id,
                 property_id: "a",
                 author_id: role,
-                author_name: profile.name,
+
                 author_role: role,
                 kind: post.kind,
                 body: post.body,

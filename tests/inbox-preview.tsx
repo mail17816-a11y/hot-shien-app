@@ -21,7 +21,7 @@ function Preview() {
       id: "m1",
       property_id: "b",
       author_id: "b",
-      author_name: "顧客B",
+
       author_role: "customer",
       kind: "お問い合わせ",
       body: "次回の巡回予定を教えていただけますか？",
@@ -31,7 +31,7 @@ function Preview() {
       id: "m2",
       property_id: "a",
       author_id: "a",
-      author_name: "顧客A",
+
       author_role: "customer",
       kind: "その他メッセージ",
       body: "今週末に現地へ伺う予定です。",
@@ -41,7 +41,7 @@ function Preview() {
       id: "m3",
       property_id: "b",
       author_id: "w",
-      author_name: "作業者A",
+
       author_role: "worker",
       kind: "その他メッセージ",
       body: "スタッフの返信（受付一覧には表示しません）",
@@ -49,8 +49,8 @@ function Preview() {
     },
   ];
   const people: Profile[] = [
-    { id: "a", name: "顧客A", role: "customer", active: true },
-    { id: "b", name: "顧客B", role: "customer", active: true },
+    { id: "a", customer_number: "C000001", role: "customer", active: true },
+    { id: "b", customer_number: "C000002", role: "customer", active: true },
   ];
   return (
     <main className="content">
@@ -65,8 +65,8 @@ function Preview() {
         requests={requests}
         messages={messages}
         properties={[
-          { id: "a", name: "物件A", address: "テスト住所A", customer_id: "a" },
-          { id: "b", name: "物件B", address: "テスト住所B", customer_id: "b" },
+          { id: "a", property_number: "P000001", customer_id: "a" },
+          { id: "b", property_number: "P000002", customer_id: "b" },
         ]}
         people={people}
         busy={false}
