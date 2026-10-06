@@ -1,35 +1,684 @@
-import { useEffect, useState, useRef, type FormEvent } from 'react';
-import type { Session } from '@supabase/supabase-js';
-import { supabase as db } from './supabase';
-type Profile = {id:string; name:string; role:'admin'|'worker'|'customer'; active:boolean};
-type Property = {id:string; name:string; address:string; customer_id:string};
-type Report = {id:string; property_id:string; kind:string; body:string; performed_on:string; photo_paths:string[]; urls?:string[]};
-type Request = {id:string; property_id:string; kind:string; body:string; status:string; created_at:string};
-const kinds = ['定期巡回','除草・清掃','郵便物対応'];
-const roles = {admin:'管理者',worker:'作業者',customer:'顧客'};
-const errorText = (e:unknown) => e instanceof Error ? e.message : typeof e === 'object' && e && 'message' in e ? String(e.message) : '処理に失敗しました。再度お試しください。';
-export default function App(){
- const generation=useRef(0);
- const [session,setSession]=useState<Session|null>(null),[ready,setReady]=useState(false),[profile,setProfile]=useState<Profile|null>(null);
- const [properties,setProperties]=useState<Property[]>([]),[reports,setReports]=useState<Report[]>([]),[requests,setRequests]=useState<Request[]>([]),[people,setPeople]=useState<Profile[]>([]);
- const [selected,setSelected]=useState(''),[tab,setTab]=useState('timeline'),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
- useEffect(()=>{if(!db){setReady(true);return} let live=true; db.auth.getSession().then(({data,error})=>{if(live){setSession(data.session);setReady(true);if(error)setError(error.message)}});const {data}=db.auth.onAuthStateChange((_event,s)=>{generation.current++;setSession(s);setProfile(null);setProperties([]);setReports([]);setRequests([]);setPeople([]);setSelected('');});return()=>{live=false;data.subscription.unsubscribe()}},[]);
- async function load(){if(!db||!session)return; const version=generation.current; const p=await db.from('profiles').select('*').eq('id',session.user.id).single();if(version!==generation.current)return;if(p.error)throw p.error;if(!p.data.active)throw new Error('このアカウントは停止されています。管理者にお問い合わせください。');setProfile(p.data);
- const [a,b,c]=await Promise.all([db.from('properties').select('*').order('name'),db.from('reports').select('*').order('performed_on',{ascending:false}).order('created_at',{ascending:false}),db.from('work_requests').select('*').order('created_at',{ascending:false})]);if(version!==generation.current)return;if(a.error)throw a.error;if(b.error)throw b.error;if(c.error)throw c.error;setProperties(a.data);setRequests(c.data);
- const hydrated=await Promise.all(b.data.map(async(r:Report)=>{if(!r.photo_paths.length)return {...r,urls:[]};const result=await db!.storage.from('report-photos').createSignedUrls(r.photo_paths,3600);if(result.error)throw result.error;return {...r,urls:result.data.map(x=>x.signedUrl).filter((url):url is string=>Boolean(url))}}));if(version!==generation.current)return;setReports(hydrated);
- if(p.data.role==='admin'){const all=await db.from('profiles').select('*').order('name');if(version!==generation.current)return;if(all.error)throw all.error;setPeople(all.data)} }
- useEffect(()=>{let cancelled=false; if(session)load().catch(e=>{if(!cancelled)setError(errorText(e))});return()=>{cancelled=true}},[session]);
- async function action(task:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await task();await load();setNotice('保存しました。')}catch(e){setError(errorText(e))}finally{setBusy(false)}}
- async function login(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);await action(async()=>{const r=await db!.auth.signInWithPassword({email:String(f.get('email')),password:String(f.get('password'))});if(r.error)throw r.error})}
- async function saveReport(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget,f=new FormData(form);await action(async()=>{const id=crypto.randomUUID();const r=await db!.from('reports').insert({id,property_id:selected,kind:f.get('kind'),body:f.get('body'),performed_on:f.get('date'),author_id:profile!.id}).select('id').single();if(r.error)throw r.error;
- const files=f.getAll('photos').filter((x):x is File=>x instanceof File&&x.size>0);const paths:string[]=[];try{if(files.length>10)throw new Error('写真は10枚まで登録できます。');for(const file of files){if(file.size>10*1024*1024||!['image/jpeg','image/png','image/webp'].includes(file.type))throw new Error('写真は10MB以下のJPEG・PNG・WebPを選んでください。');const path=`${id}/${crypto.randomUUID()}`;const up=await db!.storage.from('report-photos').upload(path,file,{contentType:file.type});if(up.error)throw up.error;paths.push(path)}const update=await db!.from('reports').update({photo_paths:paths}).eq('id',id);if(update.error)throw update.error;}catch(e){if(paths.length)await db!.storage.from('report-photos').remove(paths);await db!.from('reports').delete().eq('id',id);throw e}form.reset()})}
- const filtered=reports.filter(r=>!selected||r.property_id===selected),filteredRequests=requests.filter(r=>!selected||r.property_id===selected);
- if(!ready)return <main className="login"><p role="status">読み込み中…</p></main>;
- if(!session)return <main className="login"><div className="intro"><span className="eyebrow">TOIRO · PROPERTY CARE</span><h1>大切な物件に、<br/>いつもの安心を。</h1><p>巡回の記録も、日々のお手入れも。<br/>物件の「いま」を、ひとつにつなぐ。</p><span className="brand">Palette <b>Link</b><i>●</i></span></div><section className="login-card"><h2>ログイン</h2><p className="muted">登録済みのアカウントでご利用ください。</p>{!db?<p role="alert">接続設定がありません。管理者が環境変数を設定してください。</p>:<form onSubmit={login}><label>メールアドレス<input name="email" type="email" autoComplete="username" required/></label><label>パスワード<input name="password" type="password" autoComplete="current-password" required/></label><button disabled={busy}>{busy?'確認中…':'ログイン'}</button></form>}{error&&<p className="error" role="alert">{error}</p>}<small>アカウントについてはTOIROにお問い合わせください。</small></section></main>;
- return <div className="app"><aside><div className="brand">Palette <b>Link</b><i>●</i></div><span className="eyebrow">物件定期巡回管理</span><nav>{[['timeline','作業タイムライン'],['requests','追加作業の依頼'],...(profile?.role!=='customer'?[['report','作業報告を登録']]:[]),...(profile?.role==='admin'?[['manage','物件・ユーザー管理']]:[])].map(([key,label])=><button className={tab===key?'active':''} onClick={()=>setTab(key)} key={key}>{label}</button>)}</nav><div className="account"><b>{profile?.name||session.user.email}</b><small>{profile&&roles[profile.role]}</small><button className="quiet" onClick={async()=>{const r=await db!.auth.signOut();if(r.error)setError(r.error.message)}}>ログアウト</button></div></aside><main className="content"><header><div><span className="eyebrow">YOUR PROPERTY, CONNECTED</span><h1>{tab==='timeline'?'物件のいまを確認':tab==='requests'?'追加作業の依頼':tab==='report'?'作業報告を登録':'物件・ユーザー管理'}</h1></div><button className="quiet" disabled={busy} onClick={()=>action(async()=>{})}>更新</button></header>{error&&<p className="error" role="alert">{error}</p>}{notice&&<p className="success" role="status">{notice}</p>}{profile&&<><section className="summary"><div><small>管理物件</small><strong>{properties.length}<em>件</em></strong></div><div><small>作業報告</small><strong>{reports.length}<em>件</em></strong></div><div><small>未完了の依頼</small><strong>{requests.filter(r=>r.status!=='完了').length}<em>件</em></strong></div></section><label className="selector">対象の物件<select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">すべての物件</option>{properties.map(p=><option key={p.id} value={p.id}>{p.name} — {p.address}</option>)}</select></label>
- {tab==='timeline'&&<section><div className="section-title"><h2>作業タイムライン</h2><span>{filtered.length}件の記録</span></div>{filtered.length===0?<div className="empty">まだ作業報告がありません。<p>巡回結果が登録されると、ここに表示されます。</p></div>:<div className="timeline">{filtered.map(r=><article className="report" key={r.id}><div className="report-top"><span className="tag">{r.kind}</span><time>{r.performed_on}</time></div><h3>{properties.find(p=>p.id===r.property_id)?.name}</h3><p className="body">{r.body}</p>{!!r.urls?.length&&<div className="photos">{r.urls.map((url,i)=><a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt={`${r.kind}の報告写真 ${i+1}`} loading="lazy"/></a>)}</div>}</article>)}</div>}</section>}
- {tab==='report'&&profile.role!=='customer'&&<section className="panel"><h2>新しい作業記録</h2><form onSubmit={saveReport}><p className="muted">上の一覧から報告する物件を選択してください。</p><div className="row"><label>作業種別<select name="kind">{kinds.map(k=><option key={k}>{k}</option>)}</select></label><label>作業日<input type="date" name="date" defaultValue={new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date())} required/></label></div><label>報告内容<textarea name="body" rows={5} maxLength={5000} required placeholder="物件の様子、実施した作業、気になる点など"/></label><label>写真（10枚まで・1枚10MB以下）<input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple/></label><button disabled={busy||!selected}>{busy?'保存中…':'報告を登録'}</button></form></section>}
- {tab==='requests'&&<section>{profile.role==='customer'&&<div className="panel"><h2>作業を依頼する</h2><form onSubmit={e=>{e.preventDefault();const form=e.currentTarget,f=new FormData(form);action(async()=>{const r=await db!.from('work_requests').insert({property_id:selected,customer_id:profile.id,kind:f.get('kind'),body:f.get('body')});if(r.error)throw r.error;form.reset()})}}><p className="muted">対象の物件を選び、ご希望の作業をお知らせください。</p><label>作業種別<select name="kind"><option>除草・清掃</option><option>郵便物転送</option><option>その他</option></select></label><label>ご依頼内容<textarea name="body" rows={3} maxLength={5000} required/></label><button disabled={busy||!selected}>依頼を送信</button></form></div>}<h2>依頼一覧</h2>{!filteredRequests.length&&<div className="empty">追加作業の依頼はありません。</div>}{filteredRequests.map(r=><article className="panel" key={r.id}><div className="report-top"><span className="tag">{r.status}</span><time>{new Date(r.created_at).toLocaleDateString('ja-JP')}</time></div><h3>{r.kind} · {properties.find(p=>p.id===r.property_id)?.name}</h3><p className="body">{r.body}</p>{profile.role!=='customer'&&<label>対応状況<select value={r.status} disabled={busy} onChange={e=>action(async()=>{const result=await db!.from('work_requests').update({status:e.target.value}).eq('id',r.id);if(result.error)throw result.error})}>{['受付待ち','受付済み','作業中','完了'].map(s=><option key={s}>{s}</option>)}</select></label>}</article>)}</section>}
- {tab==='manage'&&profile.role==='admin'&&<section className="panel"><h2>物件を登録</h2><form onSubmit={e=>{e.preventDefault();const form=e.currentTarget,f=new FormData(form);action(async()=>{const r=await db!.from('properties').insert({name:f.get('name'),address:f.get('address'),customer_id:f.get('customer')});if(r.error)throw r.error;form.reset()})}}><label>物件名<input name="name" maxLength={200} required/></label><label>住所<input name="address" maxLength={500} required/></label><label>契約者<select name="customer" required><option value="">顧客を選択</option>{people.filter(p=>p.role==='customer'&&p.active).map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label><button disabled={busy}>物件を登録</button></form><h2>ユーザー</h2><p className="muted">アカウントの作成と役割の設定は、初期段階ではSupabase管理画面で行います。</p>{people.map(p=><div className="person" key={p.id}><div><b>{p.name}</b><small>{roles[p.role]} · {p.active?'利用中':'停止中'}</small></div><button className="quiet" disabled={busy||p.id===profile.id} onClick={()=>action(async()=>{const r=await db!.from('profiles').update({active:!p.active}).eq('id',p.id);if(r.error)throw r.error})}>{p.active?'利用停止':'利用再開'}</button></div>)}</section>}
- </>}<footer>Palette Link · TOIRO</footer></main></div>;
+import { useEffect, useState, useRef, type FormEvent } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase as db } from "./supabase";
+import Timeline, {
+  type Profile,
+  type Property,
+  type Report,
+  type WorkRequest as Request,
+  type Message,
+  type Post,
+} from "./Timeline";
+const kinds = ["定期巡回", "除草・清掃", "郵便物対応"];
+const roles = { admin: "管理者", worker: "作業者", customer: "顧客" };
+const errorText = (e: unknown) =>
+  e instanceof Error
+    ? e.message
+    : typeof e === "object" && e && "message" in e
+      ? String(e.message)
+      : "処理に失敗しました。再度お試しください。";
+export default function App() {
+  const generation = useRef(0);
+  const [session, setSession] = useState<Session | null>(null),
+    [ready, setReady] = useState(false),
+    [profile, setProfile] = useState<Profile | null>(null);
+  const [properties, setProperties] = useState<Property[]>([]),
+    [reports, setReports] = useState<Report[]>([]),
+    [requests, setRequests] = useState<Request[]>([]),
+    [people, setPeople] = useState<Profile[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]),
+    [messagesReady, setMessagesReady] = useState(false);
+  const [selected, setSelected] = useState(""),
+    [tab, setTab] = useState("timeline"),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
+    [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!db) {
+      setReady(true);
+      return;
+    }
+    let live = true;
+    db.auth.getSession().then(({ data, error }) => {
+      if (live) {
+        setSession(data.session);
+        setReady(true);
+        if (error) setError(error.message);
+      }
+    });
+    const { data } = db.auth.onAuthStateChange((_event, s) => {
+      generation.current++;
+      setSession(s);
+      setProfile(null);
+      setProperties([]);
+      setReports([]);
+      setRequests([]);
+      setPeople([]);
+      setMessages([]);
+      setMessagesReady(false);
+      setTab("timeline");
+      setSelected("");
+    });
+    return () => {
+      live = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+  async function load() {
+    if (!db || !session) return;
+    const version = generation.current;
+    const p = await db
+      .from("profiles")
+      .select("*")
+      .eq("id", session.user.id)
+      .single();
+    if (version !== generation.current) return;
+    if (p.error) throw p.error;
+    if (!p.data.active)
+      throw new Error(
+        "このアカウントは停止されています。管理者にお問い合わせください。",
+      );
+    setProfile(p.data);
+    const [a, b, c, m] = await Promise.all([
+      db.from("properties").select("*").order("name"),
+      db
+        .from("reports")
+        .select("*")
+        .order("performed_on", { ascending: false })
+        .order("created_at", { ascending: false }),
+      db
+        .from("work_requests")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      db
+        .from("property_messages")
+        .select("*")
+        .order("created_at", { ascending: true }),
+    ]);
+    if (version !== generation.current) return;
+    if (a.error) throw a.error;
+    if (b.error) throw b.error;
+    if (c.error) throw c.error;
+    setProperties(a.data);
+    setRequests(c.data);
+    if (m.error) {
+      setMessages([]);
+      setMessagesReady(false);
+      if (!["PGRST205", "42P01"].includes(m.error.code)) throw m.error;
+    } else {
+      setMessages(m.data);
+      setMessagesReady(true);
+    }
+    const hydrated = await Promise.all(
+      b.data.map(async (r: Report) => {
+        if (!r.photo_paths.length) return { ...r, urls: [] };
+        const result = await db!.storage
+          .from("report-photos")
+          .createSignedUrls(r.photo_paths, 3600);
+        if (result.error) throw result.error;
+        return {
+          ...r,
+          urls: result.data
+            .map((x) => x.signedUrl)
+            .filter((url): url is string => Boolean(url)),
+        };
+      }),
+    );
+    if (version !== generation.current) return;
+    setReports(hydrated);
+    if (p.data.role === "admin") {
+      const all = await db.from("profiles").select("*").order("name");
+      if (version !== generation.current) return;
+      if (all.error) throw all.error;
+      setPeople(all.data);
+    }
+  }
+  useEffect(() => {
+    let cancelled = false;
+    if (session)
+      load().catch((e) => {
+        if (!cancelled) setError(errorText(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+  async function action(task: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await task();
+      await load();
+      setNotice("保存しました。");
+      return true;
+    } catch (e) {
+      setError(errorText(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function login(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    await action(async () => {
+      const r = await db!.auth.signInWithPassword({
+        email: String(f.get("email")),
+        password: String(f.get("password")),
+      });
+      if (r.error) throw r.error;
+    });
+  }
+  async function saveReport(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget,
+      f = new FormData(form);
+    await action(async () => {
+      const id = crypto.randomUUID();
+      const r = await db!
+        .from("reports")
+        .insert({
+          id,
+          property_id: selected,
+          kind: f.get("kind"),
+          body: f.get("body"),
+          performed_on: f.get("date"),
+          author_id: profile!.id,
+        })
+        .select("id")
+        .single();
+      if (r.error) throw r.error;
+      const files = f
+        .getAll("photos")
+        .filter((x): x is File => x instanceof File && x.size > 0);
+      const paths: string[] = [];
+      try {
+        if (files.length > 10) throw new Error("写真は10枚まで登録できます。");
+        for (const file of files) {
+          if (
+            file.size > 10 * 1024 * 1024 ||
+            !["image/jpeg", "image/png", "image/webp"].includes(file.type)
+          )
+            throw new Error(
+              "写真は10MB以下のJPEG・PNG・WebPを選んでください。",
+            );
+          const path = `${id}/${crypto.randomUUID()}`;
+          const up = await db!.storage
+            .from("report-photos")
+            .upload(path, file, { contentType: file.type });
+          if (up.error) throw up.error;
+          paths.push(path);
+        }
+        const update = await db!
+          .from("reports")
+          .update({ photo_paths: paths })
+          .eq("id", id);
+        if (update.error) throw update.error;
+      } catch (e) {
+        if (paths.length) await db!.storage.from("report-photos").remove(paths);
+        await db!.from("reports").delete().eq("id", id);
+        throw e;
+      }
+      form.reset();
+    });
+  }
+  async function postMessage(post: Post) {
+    if (!selected || !profile) {
+      setError("投稿先の物件を選択してください。");
+      return false;
+    }
+    if (!post.body) {
+      setError("本文を入力してください。");
+      return false;
+    }
+    if (post.kind !== "作業依頼" && !messagesReady) {
+      setError("メッセージ機能の初期設定が必要です。");
+      return false;
+    }
+    return action(async () => {
+      const result =
+        post.kind === "作業依頼"
+          ? await db!.from("work_requests").insert({
+              property_id: selected,
+              customer_id: profile.id,
+              kind: post.workKind,
+              body: post.body,
+            })
+          : await db!.from("property_messages").insert({
+              property_id: selected,
+              author_id: profile.id,
+              kind: post.kind,
+              body: post.body,
+            });
+      if (result.error) throw result.error;
+    });
+  }
+  async function changeStatus(id: string, status: string) {
+    await action(async () => {
+      const result = await db!
+        .from("work_requests")
+        .update({ status })
+        .eq("id", id);
+      if (result.error) throw result.error;
+    });
+  }
+  const filteredRequests = requests.filter(
+    (r) => !selected || r.property_id === selected,
+  );
+  if (!ready)
+    return (
+      <main className="login">
+        <p role="status">読み込み中…</p>
+      </main>
+    );
+  if (!session)
+    return (
+      <main className="login">
+        <div className="intro">
+          <span className="eyebrow">TOIRO · PROPERTY CARE</span>
+          <h1>
+            大切な物件に、
+            <br />
+            いつもの安心を。
+          </h1>
+          <p>
+            巡回の記録も、日々のお手入れも。
+            <br />
+            物件の「いま」を、ひとつにつなぐ。
+          </p>
+          <span className="brand">
+            Palette <b>Link</b>
+            <i>●</i>
+          </span>
+        </div>
+        <section className="login-card">
+          <h2>ログイン</h2>
+          <p className="muted">登録済みのアカウントでご利用ください。</p>
+          {!db ? (
+            <p role="alert">
+              接続設定がありません。管理者が環境変数を設定してください。
+            </p>
+          ) : (
+            <form onSubmit={login}>
+              <label>
+                メールアドレス
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="username"
+                  required
+                />
+              </label>
+              <label>
+                パスワード
+                <input
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                />
+              </label>
+              <button disabled={busy}>{busy ? "確認中…" : "ログイン"}</button>
+            </form>
+          )}
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          <small>アカウントについてはTOIROにお問い合わせください。</small>
+        </section>
+      </main>
+    );
+  return (
+    <div className="app">
+      <aside>
+        <div className="brand">
+          Palette <b>Link</b>
+          <i>●</i>
+        </div>
+        <span className="eyebrow">物件定期巡回管理</span>
+        <nav>
+          {[
+            ["timeline", "コミュニケーション"],
+            ["requests", "追加作業の依頼"],
+            ...(profile?.role !== "customer"
+              ? [["report", "作業報告を登録"]]
+              : []),
+            ...(profile?.role === "admin"
+              ? [["manage", "物件・ユーザー管理"]]
+              : []),
+          ].map(([key, label]) => (
+            <button
+              className={tab === key ? "active" : ""}
+              onClick={() => setTab(key)}
+              key={key}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="account">
+          <b>{profile?.name || session.user.email}</b>
+          <small>{profile && roles[profile.role]}</small>
+          <button
+            className="quiet"
+            onClick={async () => {
+              const r = await db!.auth.signOut();
+              if (r.error) setError(r.error.message);
+            }}
+          >
+            ログアウト
+          </button>
+        </div>
+      </aside>
+      <main className="content">
+        <header>
+          <div>
+            <span className="eyebrow">YOUR PROPERTY, CONNECTED</span>
+            <h1>
+              {tab === "timeline"
+                ? "物件のコミュニケーション"
+                : tab === "requests"
+                  ? "追加作業の依頼"
+                  : tab === "report"
+                    ? "作業報告を登録"
+                    : "物件・ユーザー管理"}
+            </h1>
+          </div>
+          <button
+            className="quiet"
+            disabled={busy}
+            onClick={() => action(async () => {})}
+          >
+            更新
+          </button>
+        </header>
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="success" role="status">
+            {notice}
+          </p>
+        )}
+        {profile && (
+          <>
+            <section className="summary">
+              <div>
+                <small>管理物件</small>
+                <strong>
+                  {properties.length}
+                  <em>件</em>
+                </strong>
+              </div>
+              <div>
+                <small>作業報告</small>
+                <strong>
+                  {reports.length}
+                  <em>件</em>
+                </strong>
+              </div>
+              <div>
+                <small>未完了の依頼</small>
+                <strong>
+                  {requests.filter((r) => r.status !== "完了").length}
+                  <em>件</em>
+                </strong>
+              </div>
+            </section>
+            <label className="selector">
+              対象の物件
+              <select
+                value={selected}
+                onChange={(e) => setSelected(e.target.value)}
+              >
+                <option value="">すべての物件</option>
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.address}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {tab === "timeline" && (
+              <Timeline
+                reports={reports}
+                requests={requests}
+                messages={messages}
+                properties={properties}
+                selected={selected}
+                profile={profile}
+                busy={busy}
+                messagesReady={messagesReady}
+                onPost={postMessage}
+                onStatus={changeStatus}
+              />
+            )}
+            {tab === "report" && profile.role !== "customer" && (
+              <section className="panel">
+                <h2>新しい作業記録</h2>
+                <form onSubmit={saveReport}>
+                  <p className="muted">
+                    上の一覧から報告する物件を選択してください。
+                  </p>
+                  <div className="row">
+                    <label>
+                      作業種別
+                      <select name="kind">
+                        {kinds.map((k) => (
+                          <option key={k}>{k}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      作業日
+                      <input
+                        type="date"
+                        name="date"
+                        defaultValue={new Intl.DateTimeFormat("sv-SE", {
+                          timeZone: "Asia/Tokyo",
+                        }).format(new Date())}
+                        required
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    報告内容
+                    <textarea
+                      name="body"
+                      rows={5}
+                      maxLength={5000}
+                      required
+                      placeholder="物件の様子、実施した作業、気になる点など"
+                    />
+                  </label>
+                  <label>
+                    写真（10枚まで・1枚10MB以下）
+                    <input
+                      type="file"
+                      name="photos"
+                      accept="image/jpeg,image/png,image/webp"
+                      multiple
+                    />
+                  </label>
+                  <button disabled={busy || !selected}>
+                    {busy ? "保存中…" : "報告を登録"}
+                  </button>
+                </form>
+              </section>
+            )}
+            {tab === "requests" && (
+              <section>
+                {profile.role === "customer" && (
+                  <div className="panel">
+                    <h2>作業を依頼する</h2>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const form = e.currentTarget,
+                          f = new FormData(form);
+                        action(async () => {
+                          const r = await db!.from("work_requests").insert({
+                            property_id: selected,
+                            customer_id: profile.id,
+                            kind: f.get("kind"),
+                            body: f.get("body"),
+                          });
+                          if (r.error) throw r.error;
+                          form.reset();
+                        });
+                      }}
+                    >
+                      <p className="muted">
+                        対象の物件を選び、ご希望の作業をお知らせください。
+                      </p>
+                      <label>
+                        作業種別
+                        <select name="kind">
+                          <option>除草・清掃</option>
+                          <option>郵便物転送</option>
+                          <option>その他</option>
+                        </select>
+                      </label>
+                      <label>
+                        ご依頼内容
+                        <textarea
+                          name="body"
+                          rows={3}
+                          maxLength={5000}
+                          required
+                        />
+                      </label>
+                      <button disabled={busy || !selected}>依頼を送信</button>
+                    </form>
+                  </div>
+                )}
+                <h2>依頼一覧</h2>
+                {!filteredRequests.length && (
+                  <div className="empty">追加作業の依頼はありません。</div>
+                )}
+                {filteredRequests.map((r) => (
+                  <article className="panel" key={r.id}>
+                    <div className="report-top">
+                      <span className="tag">{r.status}</span>
+                      <time>
+                        {new Date(r.created_at).toLocaleDateString("ja-JP")}
+                      </time>
+                    </div>
+                    <h3>
+                      {r.kind} ·{" "}
+                      {properties.find((p) => p.id === r.property_id)?.name}
+                    </h3>
+                    <p className="body">{r.body}</p>
+                    {profile.role !== "customer" && (
+                      <label>
+                        対応状況
+                        <select
+                          value={r.status}
+                          disabled={busy}
+                          onChange={(e) =>
+                            action(async () => {
+                              const result = await db!
+                                .from("work_requests")
+                                .update({ status: e.target.value })
+                                .eq("id", r.id);
+                              if (result.error) throw result.error;
+                            })
+                          }
+                        >
+                          {["受付待ち", "受付済み", "作業中", "完了"].map(
+                            (s) => (
+                              <option key={s}>{s}</option>
+                            ),
+                          )}
+                        </select>
+                      </label>
+                    )}
+                  </article>
+                ))}
+              </section>
+            )}
+            {tab === "manage" && profile.role === "admin" && (
+              <section className="panel">
+                <h2>物件を登録</h2>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget,
+                      f = new FormData(form);
+                    action(async () => {
+                      const r = await db!.from("properties").insert({
+                        name: f.get("name"),
+                        address: f.get("address"),
+                        customer_id: f.get("customer"),
+                      });
+                      if (r.error) throw r.error;
+                      form.reset();
+                    });
+                  }}
+                >
+                  <label>
+                    物件名
+                    <input name="name" maxLength={200} required />
+                  </label>
+                  <label>
+                    住所
+                    <input name="address" maxLength={500} required />
+                  </label>
+                  <label>
+                    契約者
+                    <select name="customer" required>
+                      <option value="">顧客を選択</option>
+                      {people
+                        .filter((p) => p.role === "customer" && p.active)
+                        .map((p) => (
+                          <option value={p.id} key={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <button disabled={busy}>物件を登録</button>
+                </form>
+                <h2>ユーザー</h2>
+                <p className="muted">
+                  アカウントの作成と役割の設定は、初期段階ではSupabase管理画面で行います。
+                </p>
+                {people.map((p) => (
+                  <div className="person" key={p.id}>
+                    <div>
+                      <b>{p.name}</b>
+                      <small>
+                        {roles[p.role]} · {p.active ? "利用中" : "停止中"}
+                      </small>
+                    </div>
+                    <button
+                      className="quiet"
+                      disabled={busy || p.id === profile.id}
+                      onClick={() =>
+                        action(async () => {
+                          const r = await db!
+                            .from("profiles")
+                            .update({ active: !p.active })
+                            .eq("id", p.id);
+                          if (r.error) throw r.error;
+                        })
+                      }
+                    >
+                      {p.active ? "利用停止" : "利用再開"}
+                    </button>
+                  </div>
+                ))}
+              </section>
+            )}
+          </>
+        )}
+        <footer>Palette Link · TOIRO</footer>
+      </main>
+    </div>
+  );
 }
