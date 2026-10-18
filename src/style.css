@@ -600,3 +600,47 @@ fieldset {
   white-space: nowrap;
   border: 0;
 }
+
+.user-management {
+  margin-top: 36px;
+}
+.user-management summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+.user-management details {
+  padding: 18px;
+  margin-top: 20px;
+}
+.user-management form button {
+  margin-top: 14px;
+}
+.user-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.user-actions button {
+  font-size: 12px;
+  padding: 8px 12px;
+}
+.user-editor {
+  margin-top: 22px;
+}
+.checkbox-label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.checkbox-label input {
+  width: auto;
+  margin: 0;
+}
+.user-management .inbox-table td:nth-child(5) {
+  min-width: 260px;
+}
+.user-management input[type="password"] {
+  max-width: 420px;
+}

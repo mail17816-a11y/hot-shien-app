@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase as db } from "./supabase";
-import { loginEmail, normalizePropertyNumber } from "./login";
+import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
+import UserManagement, { type UserOperation } from "./UserManagement";
 import RequestInbox from "./RequestInbox";
 import Timeline, {
   type Profile,
@@ -76,6 +77,14 @@ export default function App() {
       .single();
     if (version !== generation.current) return;
     if (p.error) throw p.error;
+    if (
+      p.data.auth_valid_after &&
+      jwtIssuedAt(session.access_token) <= p.data.auth_valid_after
+    ) {
+      setError("アカウント情報が更新されました。ログインし直してください。");
+      await db.auth.signOut({ scope: "local" });
+      return;
+    }
     if (!p.data.active)
       throw new Error(
         "このアカウントは停止されています。管理者にお問い合わせください。",
@@ -159,6 +168,56 @@ export default function App() {
       return true;
     } catch (e) {
       setError(errorText(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveUser(operation: UserOperation) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const {
+        data: { session: current },
+        error: sessionError,
+      } = await db!.auth.getSession();
+      if (sessionError || !current)
+        throw new Error("ログインし直してください。");
+      const response = await db!.functions.invoke("admin-users", {
+        body: operation,
+        headers: { Authorization: `Bearer ${current.access_token}` },
+      });
+      if (response.error) {
+        let detail =
+          "管理サーバーに接続できません。関数の公開と追加SQLの適用を確認してください。";
+        if (response.error.context instanceof Response) {
+          try {
+            const payload = await response.error.context.json();
+            detail = payload.error || detail;
+          } catch {}
+        }
+        throw new Error(detail);
+      }
+      if (response.data?.error) throw new Error(response.data.error);
+      const updated = response.data?.user as Profile | undefined;
+      if (updated)
+        setPeople((old) =>
+          (old.some((person) => person.id === updated.id)
+            ? old.map((person) => (person.id === updated.id ? updated : person))
+            : [...old, updated]
+          ).sort((a, b) => a.login_id.localeCompare(b.login_id)),
+        );
+      setNotice(
+        operation.action === "delete"
+          ? "ユーザーを削除済みにしました。履歴は保持しています。"
+          : operation.action === "password"
+            ? "パスワードを再設定しました。"
+            : "ユーザー情報を保存しました。",
+      );
+      return true;
+    } catch (error) {
+      setError(errorText(error));
       return false;
     } finally {
       setBusy(false);
@@ -654,7 +713,10 @@ export default function App() {
                     <select name="customer" required>
                       <option value="">顧客を選択</option>
                       {people
-                        .filter((p) => p.role === "customer" && p.active)
+                        .filter(
+                          (p) =>
+                            p.role === "customer" && p.active && !p.deleted_at,
+                        )
                         .map((p) => (
                           <option value={p.id} key={p.id}>
                             {p.customer_number || p.login_id}
@@ -664,35 +726,12 @@ export default function App() {
                   </label>
                   <button disabled={busy}>物件を登録</button>
                 </form>
-                <h2>ユーザー</h2>
-                <p className="muted">
-                  アカウントの作成と役割の設定は、初期段階ではSupabase管理画面で行います。
-                </p>
-                {people.map((p) => (
-                  <div className="person" key={p.id}>
-                    <div>
-                      <b>{p.customer_number || p.login_id}</b>
-                      <small>
-                        {roles[p.role]} · {p.active ? "利用中" : "停止中"}
-                      </small>
-                    </div>
-                    <button
-                      className="quiet"
-                      disabled={busy || p.id === profile.id}
-                      onClick={() =>
-                        action(async () => {
-                          const r = await db!
-                            .from("profiles")
-                            .update({ active: !p.active })
-                            .eq("id", p.id);
-                          if (r.error) throw r.error;
-                        })
-                      }
-                    >
-                      {p.active ? "利用停止" : "利用再開"}
-                    </button>
-                  </div>
-                ))}
+                <UserManagement
+                  users={people}
+                  currentUserId={profile.id}
+                  busy={busy}
+                  onSave={saveUser}
+                />
               </section>
             )}
           </>
