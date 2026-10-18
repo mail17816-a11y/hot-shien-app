@@ -29,7 +29,20 @@ export default function UserManagement({
 }) {
   const [selected, setSelected] = useState<Profile | null>(null),
     [mode, setMode] = useState<"edit" | "password" | "delete">("edit"),
-    [showDeleted, setShowDeleted] = useState(false);
+    [showDeleted, setShowDeleted] = useState(true),
+    [search, setSearch] = useState("");
+  const visibleUsers = users.filter(
+    (user) =>
+      (showDeleted || !user.deleted_at) &&
+      [
+        user.login_id,
+        user.customer_number,
+        labels[user.role],
+        user.deleted_at ? "削除済み" : user.active ? "利用中" : "停止中",
+      ].some((value) =>
+        value?.toLowerCase().includes(search.trim().toLowerCase()),
+      ),
+  );
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget,
@@ -122,6 +135,18 @@ export default function UserManagement({
           </fieldset>
         </form>
       </details>
+      <label>
+        ユーザーを検索
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="ログインID・顧客番号・役割・状態"
+        />
+      </label>
+      <p role="status">
+        {visibleUsers.length}件 / 全{users.length}件
+      </p>
       <label className="checkbox-label">
         <input
           type="checkbox"
@@ -143,56 +168,59 @@ export default function UserManagement({
             </tr>
           </thead>
           <tbody>
-            {users
-              .filter((user) => showDeleted || !user.deleted_at)
-              .map((user) => (
-                <tr key={user.id}>
-                  <td>
-                    {user.login_id}
-                    {user.id === currentUserId && <small>ログイン中</small>}
-                  </td>
-                  <td>{user.customer_number || "—"}</td>
-                  <td>{labels[user.role]}</td>
-                  <td>
-                    {user.deleted_at
-                      ? "削除済み"
-                      : user.active
-                        ? "利用中"
-                        : "停止中"}
-                  </td>
-                  <td>
-                    <div className="user-actions">
-                      {(["edit", "password", "delete"] as const).map(
-                        (action) => (
-                          <button
-                            type="button"
-                            className="quiet"
-                            key={action}
-                            disabled={
-                              busy ||
-                              user.id === currentUserId ||
-                              Boolean(user.deleted_at)
-                            }
-                            onClick={() => {
-                              setSelected(user);
-                              setMode(action);
-                            }}
-                          >
-                            {action === "edit"
-                              ? "編集"
-                              : action === "password"
-                                ? "パスワード再設定"
-                                : "削除"}
-                          </button>
-                        ),
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+            {visibleUsers.map((user) => (
+              <tr key={user.id}>
+                <td>
+                  {user.login_id}
+                  {user.id === currentUserId && <small>ログイン中</small>}
+                </td>
+                <td>{user.customer_number || "—"}</td>
+                <td>{labels[user.role]}</td>
+                <td>
+                  {user.deleted_at
+                    ? "削除済み"
+                    : user.active
+                      ? "利用中"
+                      : "停止中"}
+                </td>
+                <td>
+                  <div className="user-actions">
+                    {(["edit", "password", "delete"] as const).map((action) => (
+                      <button
+                        type="button"
+                        className="quiet"
+                        key={action}
+                        disabled={
+                          busy ||
+                          user.id === currentUserId ||
+                          Boolean(user.deleted_at)
+                        }
+                        onClick={() => {
+                          setSelected(user);
+                          setMode(action);
+                        }}
+                      >
+                        {action === "edit"
+                          ? "編集"
+                          : action === "password"
+                            ? "パスワード再設定"
+                            : "削除"}
+                      </button>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+      {!visibleUsers.length && (
+        <p role="status">
+          {search.trim()
+            ? "該当するユーザーはいません。"
+            : "表示するユーザーはいません。"}
+        </p>
+      )}
       {selected && (
         <section
           className="panel user-editor"
