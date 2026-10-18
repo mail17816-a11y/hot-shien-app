@@ -703,6 +703,53 @@ export default function App() {
             {tab === "properties" && profile.role === "admin" && (
               <section className="panel">
                 <h2>物件一覧</h2>
+                <details className="panel property-registration">
+                  <summary>新しい物件を登録</summary>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const form = e.currentTarget,
+                        f = new FormData(form);
+                      action(async () => {
+                        const r = await db!.from("properties").insert({
+                          customer_id: f.get("customer"),
+                          property_number: normalizePropertyNumber(
+                            String(f.get("property_number")),
+                          ),
+                        });
+                        if (r.error) throw r.error;
+                        form.reset();
+                      });
+                    }}
+                  >
+                    <p className="muted">
+                      氏名・住所はローカル台帳で管理します。台帳に対応する物件番号を指定してください。
+                    </p>
+                    <label>
+                      物件番号
+                      <input name="property_number" maxLength={64} required />
+                    </label>
+                    <label>
+                      契約者の顧客番号
+                      <select name="customer" required>
+                        <option value="">顧客を選択</option>
+                        {people
+                          .filter(
+                            (p) =>
+                              p.role === "customer" &&
+                              p.active &&
+                              !p.deleted_at,
+                          )
+                          .map((p) => (
+                            <option value={p.id} key={p.id}>
+                              {p.customer_number || p.login_id}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <button disabled={busy}>物件を登録</button>
+                  </form>
+                </details>
                 <label>
                   物件を検索
                   <input
@@ -743,49 +790,6 @@ export default function App() {
                       : "登録されている物件はありません。"}
                   </p>
                 )}
-                <h2>物件を登録</h2>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const form = e.currentTarget,
-                      f = new FormData(form);
-                    action(async () => {
-                      const r = await db!.from("properties").insert({
-                        customer_id: f.get("customer"),
-                        property_number: normalizePropertyNumber(
-                          String(f.get("property_number")),
-                        ),
-                      });
-                      if (r.error) throw r.error;
-                      form.reset();
-                    });
-                  }}
-                >
-                  <p className="muted">
-                    氏名・住所はローカル台帳で管理します。台帳に対応する物件番号を指定してください。
-                  </p>
-                  <label>
-                    物件番号
-                    <input name="property_number" maxLength={64} required />
-                  </label>
-                  <label>
-                    契約者の顧客番号
-                    <select name="customer" required>
-                      <option value="">顧客を選択</option>
-                      {people
-                        .filter(
-                          (p) =>
-                            p.role === "customer" && p.active && !p.deleted_at,
-                        )
-                        .map((p) => (
-                          <option value={p.id} key={p.id}>
-                            {p.customer_number || p.login_id}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <button disabled={busy}>物件を登録</button>
-                </form>
               </section>
             )}
             {tab === "users" && profile.role === "admin" && (
