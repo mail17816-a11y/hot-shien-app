@@ -4,6 +4,7 @@ import { supabase as db } from "./supabase";
 import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
 import UserManagement, { type UserOperation } from "./UserManagement";
 import RequestInbox from "./RequestInbox";
+import ExpenseManagement, { ExpenseInputs, type Expense } from "./Expenses";
 import Timeline, {
   type Profile,
   type Property,
@@ -31,6 +32,8 @@ export default function App() {
     [people, setPeople] = useState<Profile[]>([]);
   const [messages, setMessages] = useState<Message[]>([]),
     [messagesReady, setMessagesReady] = useState(false);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [reportFormVersion, setReportFormVersion] = useState(0);
   const [selected, setSelected] = useState(""),
     [propertySearch, setPropertySearch] = useState(""),
     [tab, setTab] = useState("timeline"),
@@ -59,6 +62,7 @@ export default function App() {
       setRequests([]);
       setPeople([]);
       setMessages([]);
+      setExpenses([]);
       setMessagesReady(false);
       setTab("timeline");
       setSelected("");
@@ -146,6 +150,13 @@ export default function App() {
       if (version !== generation.current) return;
       if (all.error) throw all.error;
       setPeople(all.data);
+      const cost = await db
+        .from("report_expenses")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (version !== generation.current) return;
+      if (cost.error) throw cost.error;
+      setExpenses(cost.data);
     }
   }
   useEffect(() => {
@@ -241,18 +252,31 @@ export default function App() {
       f = new FormData(form);
     await action(async () => {
       const id = crypto.randomUUID();
-      const r = await db!
-        .from("reports")
-        .insert({
-          id,
-          property_id: selected,
-          kind: f.get("kind"),
-          body: f.get("body"),
-          performed_on: f.get("date"),
-          author_id: profile!.id,
-        })
-        .select("id")
-        .single();
+      const items = f.getAll("expense_item"),
+        amounts = f.getAll("expense_amount");
+      const costs = items.map((item, index) => ({
+        item: String(item).trim(),
+        amount_yen: Number(amounts[index]),
+      }));
+      if (
+        costs.some(
+          (cost) =>
+            !cost.item ||
+            cost.item.length > 200 ||
+            !Number.isInteger(cost.amount_yen) ||
+            cost.amount_yen < 1 ||
+            cost.amount_yen > 999999999,
+        )
+      )
+        throw new Error("実費の項目と金額を確認してください。");
+      const r = await db!.rpc("create_report_with_expenses", {
+        p_id: id,
+        p_property_id: selected,
+        p_kind: f.get("kind"),
+        p_body: f.get("body"),
+        p_performed_on: f.get("date"),
+        p_expenses: costs,
+      });
       if (r.error) throw r.error;
       const files = f
         .getAll("photos")
@@ -286,6 +310,7 @@ export default function App() {
         throw e;
       }
       form.reset();
+      setReportFormVersion((old) => old + 1);
     });
   }
   async function postMessage(post: Post) {
@@ -432,6 +457,7 @@ export default function App() {
               ? [
                   ["properties", "物件管理"],
                   ["users", "ユーザー管理"],
+                  ["expenses", "実費管理"],
                 ]
               : []),
           ].map(([key, label]) => (
@@ -477,7 +503,9 @@ export default function App() {
                     ? "作業報告を登録"
                     : tab === "properties"
                       ? "物件管理"
-                      : "ユーザー管理"}
+                      : tab === "expenses"
+                        ? "実費管理"
+                        : "ユーザー管理"}
             </h1>
           </div>
           <button
@@ -565,7 +593,7 @@ export default function App() {
             {tab === "report" && profile.role !== "customer" && (
               <section className="panel">
                 <h2>新しい作業記録</h2>
-                <form onSubmit={saveReport}>
+                <form onSubmit={saveReport} key={reportFormVersion}>
                   <p className="muted">
                     上の一覧から報告する物件を選択してください。
                   </p>
@@ -609,6 +637,7 @@ export default function App() {
                       multiple
                     />
                   </label>
+                  <ExpenseInputs />
                   <button disabled={busy || !selected}>
                     {busy ? "保存中…" : "報告を登録"}
                   </button>
@@ -791,6 +820,37 @@ export default function App() {
                   </p>
                 )}
               </section>
+            )}
+            {tab === "expenses" && profile.role === "admin" && (
+              <ExpenseManagement
+                expenses={expenses}
+                reports={reports}
+                properties={properties}
+                busy={busy}
+                onSave={async (expense, item, amount) =>
+                  action(async () => {
+                    if (
+                      !item ||
+                      item.length > 200 ||
+                      !Number.isInteger(amount) ||
+                      amount < 1 ||
+                      amount > 999999999
+                    )
+                      throw new Error("項目と金額を確認してください。");
+                    const result = await db!
+                      .from("report_expenses")
+                      .update({ item, amount_yen: amount })
+                      .eq("id", expense.id)
+                      .is("billed_at", null)
+                      .select("id");
+                    if (result.error) throw result.error;
+                    if (!result.data.length)
+                      throw new Error(
+                        "請求情報作成済みか、明細が更新されています。一覧を更新してください。",
+                      );
+                  })
+                }
+              />
             )}
             {tab === "users" && profile.role === "admin" && (
               <section className="panel">
