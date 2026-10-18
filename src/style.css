@@ -604,12 +604,14 @@ fieldset {
 .user-management {
   margin-top: 36px;
 }
-.user-management summary {
+.user-management summary,
+.property-registration summary {
   cursor: pointer;
   font-size: 14px;
   font-weight: 600;
 }
-.user-management details {
+.user-management details,
+.property-registration {
   padding: 18px;
   margin-top: 20px;
 }
