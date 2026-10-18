@@ -32,6 +32,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]),
     [messagesReady, setMessagesReady] = useState(false);
   const [selected, setSelected] = useState(""),
+    [propertySearch, setPropertySearch] = useState(""),
     [tab, setTab] = useState("timeline"),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
@@ -327,6 +328,17 @@ export default function App() {
       if (result.error) throw result.error;
     });
   }
+  const propertyRows = properties
+    .map((property) => ({
+      property,
+      owner: people.find((person) => person.id === property.customer_id),
+    }))
+    .filter(({ property, owner }) =>
+      [property.property_number, owner?.customer_number, owner?.login_id].some(
+        (value) =>
+          value?.toLowerCase().includes(propertySearch.trim().toLowerCase()),
+      ),
+    );
   const filteredRequests = requests.filter((r) => r.property_id === selected);
   if (!ready)
     return (
@@ -417,7 +429,10 @@ export default function App() {
               ? [["report", "作業報告を登録"]]
               : []),
             ...(profile?.role === "admin"
-              ? [["manage", "物件・ユーザー管理"]]
+              ? [
+                  ["properties", "物件管理"],
+                  ["users", "ユーザー管理"],
+                ]
               : []),
           ].map(([key, label]) => (
             <button
@@ -460,7 +475,9 @@ export default function App() {
                     : "作業・問い合わせ受付"
                   : tab === "report"
                     ? "作業報告を登録"
-                    : "物件・ユーザー管理"}
+                    : tab === "properties"
+                      ? "物件管理"
+                      : "ユーザー管理"}
             </h1>
           </div>
           <button
@@ -506,7 +523,9 @@ export default function App() {
                 </strong>
               </div>
             </section>
-            {!(tab === "requests" && profile.role !== "customer") && (
+            {(tab === "timeline" ||
+              tab === "report" ||
+              (tab === "requests" && profile.role === "customer")) && (
               <label className="selector">
                 対象の物件
                 <select
@@ -681,8 +700,49 @@ export default function App() {
                 ))}
               </section>
             )}
-            {tab === "manage" && profile.role === "admin" && (
+            {tab === "properties" && profile.role === "admin" && (
               <section className="panel">
+                <h2>物件一覧</h2>
+                <label>
+                  物件を検索
+                  <input
+                    type="search"
+                    value={propertySearch}
+                    onChange={(e) => setPropertySearch(e.target.value)}
+                    placeholder="物件番号・顧客番号・ログインID"
+                  />
+                </label>
+                <div className="inbox-scroll">
+                  <table className="inbox-table">
+                    <caption className="sr-only">物件一覧</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">物件番号</th>
+                        <th scope="col">顧客番号</th>
+                        <th scope="col">ログインID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {propertyRows.map(({ property, owner }) => (
+                        <tr key={property.id}>
+                          <td>{property.property_number}</td>
+                          <td>{owner?.customer_number || "—"}</td>
+                          <td>{owner?.login_id || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p role="status">
+                  {propertyRows.length}件 / 全{properties.length}件
+                </p>
+                {!propertyRows.length && (
+                  <p role="status">
+                    {propertySearch.trim()
+                      ? "該当する物件はありません。"
+                      : "登録されている物件はありません。"}
+                  </p>
+                )}
                 <h2>物件を登録</h2>
                 <form
                   onSubmit={(e) => {
@@ -726,6 +786,10 @@ export default function App() {
                   </label>
                   <button disabled={busy}>物件を登録</button>
                 </form>
+              </section>
+            )}
+            {tab === "users" && profile.role === "admin" && (
+              <section className="panel">
                 <UserManagement
                   users={people}
                   currentUserId={profile.id}
