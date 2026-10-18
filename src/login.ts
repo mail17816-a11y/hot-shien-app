@@ -19,3 +19,15 @@ export function normalizePropertyNumber(value: string): string {
   }
   return number;
 }
+
+export function jwtIssuedAt(token: string): number {
+  try {
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const value = JSON.parse(
+      atob(part.padEnd(Math.ceil(part.length / 4) * 4, "=")),
+    ).iat;
+    return Number.isSafeInteger(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}

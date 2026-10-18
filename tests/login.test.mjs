@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loginEmail, normalizePropertyNumber } from "../src/login.ts";
+import {
+  loginEmail,
+  normalizePropertyNumber,
+  jwtIssuedAt,
+} from "../src/login.ts";
 test("ログインIDを正規化し内部メールをexample.comに限定する", () => {
   assert.equal(loginEmail(" C000001 "), "c000001@example.com");
   assert.equal(loginEmail("WORKER-a_1"), "worker-a_1@example.com");
@@ -20,4 +24,14 @@ test("物件番号を固定の採番形式にせず半角の識別子として�
   assert.equal(normalizePropertyNumber("42-AB"), "42-AB");
   for (const value of ["", "住所付き 001", "a@b", "a".repeat(65)])
     assert.throws(() => normalizePropertyNumber(value));
+});
+test("画面で旧JWTを判別する発行時刻を読み、不正な値は無効とする", () => {
+  const token = `e30.${Buffer.from(JSON.stringify({ iat: 2000000000 })).toString("base64url")}.signature`;
+  assert.equal(jwtIssuedAt(token), 2000000000);
+  for (const value of [
+    "",
+    "bad.token",
+    `e30.${Buffer.from('{"iat":"123"}').toString("base64url")}.x`,
+  ])
+    assert.equal(jwtIssuedAt(value), 0);
 });

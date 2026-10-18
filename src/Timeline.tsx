@@ -7,6 +7,8 @@ export type Profile = {
   customer_number: string | null;
   role: "admin" | "worker" | "customer";
   active: boolean;
+  deleted_at?: string | null;
+  auth_valid_after?: number;
 };
 export type Property = {
   id: string;
