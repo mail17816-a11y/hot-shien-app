@@ -646,3 +646,6 @@ fieldset {
 .user-management input[type="password"] {
   max-width: 420px;
 }
+.content form > fieldset + button {
+  margin-top: 24px;
+}
