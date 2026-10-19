@@ -108,9 +108,40 @@ function Preview() {
           properties={properties}
           profile={customer}
           selected={properties[0].id}
-          reports={[]}
-          requests={[]}
-          messages={[]}
+          reports={[
+            {
+              id: "sample-report",
+              property_id: properties[0].id,
+              author_id: "sample-worker",
+              kind: "定期巡回",
+              body: "表示確認用の作業報告",
+              performed_on: "2026-10-01",
+              created_at: "2026-10-01T01:00:00Z",
+              photo_paths: [],
+            },
+          ]}
+          requests={[
+            {
+              id: "sample-request",
+              property_id: properties[0].id,
+              customer_id: customer.id,
+              kind: "除草・清掃",
+              body: "表示確認用の作業依頼",
+              status: "受付待ち",
+              created_at: "2026-10-02T01:00:00Z",
+            },
+          ]}
+          messages={[
+            {
+              id: "sample-message",
+              property_id: properties[0].id,
+              author_id: "sample-worker",
+              author_role: "worker",
+              kind: "その他メッセージ",
+              body: "表示確認用のメッセージ",
+              created_at: "2026-10-03T01:00:00Z",
+            },
+          ]}
           busy={false}
           messagesReady={true}
           invoices={invoices}
