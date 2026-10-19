@@ -18,7 +18,8 @@ export type Invoice = {
   id: string;
   customer_id: string;
   period: string;
-  status: "draft" | "published";
+  status: "draft" | "published" | "cancelled";
+  cancelled_at?: string | null;
   published_at: string | null;
   created_at: string;
 };
@@ -136,6 +137,7 @@ export default function Billing({
   );
   const [excluded, setExcluded] = useState<string[]>([]);
   const [confirmPublish, setConfirmPublish] = useState("");
+  const [confirmCancel, setConfirmCancel] = useState("");
   const ownProperties = properties.filter(
     (property) => property.customer_id === customerId,
   );
@@ -197,6 +199,7 @@ export default function Billing({
             setEditing(null);
             setExcluded([]);
             setConfirmPublish("");
+            setConfirmCancel("");
             setVersion(version + 1);
           }}
         >
@@ -510,9 +513,65 @@ export default function Billing({
                 <span className="tag">
                   {invoice.status === "draft"
                     ? "下書き・顧客には非表示"
-                    : "公開済み"}
+                    : invoice.status === "cancelled"
+                      ? "撤回済み・顧客には非表示"
+                      : "公開済み"}
                 </span>
                 <InvoiceDetails invoice={invoice} lines={lines} />
+                {invoice.status === "cancelled" && invoice.cancelled_at && (
+                  <small>
+                    撤回日時：
+                    {new Date(invoice.cancelled_at).toLocaleString("ja-JP", {
+                      timeZone: "Asia/Tokyo",
+                    })}
+                  </small>
+                )}
+                {invoice.status === "published" &&
+                  (confirmCancel === invoice.id ? (
+                    <div className="panel">
+                      <p>
+                        顧客番号「
+                        {users.find((user) => user.id === customerId)
+                          ?.customer_number || customerId}
+                        」の{invoice.period.slice(0, 7)}
+                        分の請求情報を撤回します。
+                      </p>
+                      <p>
+                        顧客の画面から非表示になります。履歴は保持し、含まれる実費は未請求に戻します。同じ月の請求を作り直せます。外部決済の取消・返金は行いません。
+                      </p>
+                      <div className="user-actions">
+                        <button
+                          disabled={busy}
+                          onClick={async () => {
+                            if (
+                              await onAction("cancel", {
+                                id: invoice.id,
+                                customer_id: customerId,
+                              })
+                            )
+                              setConfirmCancel("");
+                          }}
+                        >
+                          確認して公開を撤回
+                        </button>
+                        <button
+                          className="quiet"
+                          disabled={busy}
+                          onClick={() => setConfirmCancel("")}
+                        >
+                          戻る
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="quiet"
+                      disabled={busy}
+                      onClick={() => setConfirmCancel(invoice.id)}
+                    >
+                      公開を撤回する
+                    </button>
+                  ))}
                 {invoice.status === "draft" &&
                   (confirmPublish === invoice.id ? (
                     <div className="panel">

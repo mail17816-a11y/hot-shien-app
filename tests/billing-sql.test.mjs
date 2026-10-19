@@ -87,6 +87,7 @@ test("契約・請求の保存、顧客分離、年払い、実費ロック、�
       "20261018110758_admin_user_management.sql",
       "20261018230614_report_expenses.sql",
       "20261018232719_customer_contract_billing.sql",
+      "20261019090103_withdraw_billing_invoice.sql",
     ])
       await db.exec(
         await readFile(
@@ -270,11 +271,123 @@ test("契約・請求の保存、顧客分離、年払い、実費ロック、�
       ]),
       /変更・削除できません/,
     );
+    await as(admin, () =>
+      call(
+        "contract",
+        contract({
+          customer_id: other,
+          property_id: foreign,
+          item: "別顧客の定額",
+          amount_yen: 1000,
+        }),
+      ),
+    );
+    const otherInvoice = await as(admin, () =>
+      call("invoice", {
+        customer_id: other,
+        period: "2026-11-01",
+        expense_ids: [foreignExpense],
+      }),
+    );
+    await as(admin, () => call("publish", { id: otherInvoice }));
+    await assert.rejects(
+      as(worker, () => call("cancel", { id: invoice, customer_id: customer })),
+      /管理者権限/,
+    );
+    await assert.rejects(
+      as(customer, () =>
+        call("cancel", { id: invoice, customer_id: customer }),
+      ),
+      /管理者権限/,
+    );
+    await assert.rejects(
+      as(admin, () => call("cancel", { id: invoice, customer_id: other })),
+      /選択した顧客/,
+    );
+    await as(admin, () =>
+      call("cancel", { id: invoice, customer_id: customer }),
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select status from public.billing_invoices where id=$1",
+          [invoice],
+        )
+      ).rows[0].status,
+      "cancelled",
+    );
+    assert.equal(
+      await total(invoice),
+      7250,
+      "撤回後も請求金額の履歴を保持する",
+    );
+    await as(other, async () =>
+      assert.equal(
+        (await db.query("select * from public.billing_invoices")).rows.length,
+        1,
+        "他顧客の公開状態には影響しない",
+      ),
+    );
+    await as(customer, async () => {
+      assert.equal(
+        (await db.query("select * from public.billing_invoices")).rows.length,
+        0,
+      );
+      assert.equal(
+        (await db.query("select * from public.billing_lines")).rows.length,
+        0,
+      );
+    });
+    assert.equal(
+      (
+        await db.query(
+          "select billed_at from public.report_expenses where id=$1",
+          [expense],
+        )
+      ).rows[0].billed_at,
+      null,
+    );
+    await as(admin, () =>
+      db.query("update public.report_expenses set amount_yen=600 where id=$1", [
+        expense,
+      ]),
+    );
+    const replacement = await as(admin, () =>
+      call("invoice", bill("2026-11-01", [expense])),
+    );
+    assert.notEqual(replacement, invoice);
+    assert.equal(await total(replacement), 7300);
+    assert.equal(
+      await total(invoice),
+      7250,
+      "再請求でも撤回前の明細を維持する",
+    );
+    await as(admin, () => call("publish", { id: replacement }));
+    await assert.rejects(
+      as(admin, () => call("cancel", { id: invoice, customer_id: customer })),
+      /選択した顧客/,
+    );
+    await as(customer, async () =>
+      assert.equal(
+        (await db.query("select * from public.billing_invoices")).rows.length,
+        1,
+      ),
+    );
+    await assert.rejects(
+      as(admin, () => call("invoice", bill("2026-12-01", [expense]))),
+      /選択した実費/,
+    );
     await db.query("update public.profiles set active=false where id=$1", [
       admin,
     ]);
     await assert.rejects(
       as(admin, () => call("publish", { id: december })),
+      /管理者権限/,
+    );
+    await assert.rejects(
+      as(admin, () =>
+        call("cancel", { id: replacement, customer_id: customer }),
+      ),
       /管理者権限/,
     );
   } finally {
