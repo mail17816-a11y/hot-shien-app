@@ -649,3 +649,24 @@ fieldset {
 .content form > fieldset + button {
   margin-top: 24px;
 }
+.invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.invoice-table th,
+.invoice-table td {
+  padding: 10px;
+  border-bottom: 1px solid #e5eae2;
+  overflow-wrap: anywhere;
+}
+.invoice-table td:last-child {
+  white-space: nowrap;
+}
+.invoice-details .inbox-scroll {
+  margin-top: 16px;
+}
+.property-registration form .user-actions {
+  margin-top: 18px;
+}

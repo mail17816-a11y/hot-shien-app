@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { buildTimeline } from "./feed";
+import { InvoiceDetails, type Invoice, type InvoiceLine } from "./Billing";
 
 export type Profile = {
   id: string;
@@ -64,6 +65,8 @@ export default function Timeline({
   messagesReady,
   onPost,
   onStatus,
+  invoices = [],
+  invoiceLines = [],
 }: {
   reports: Report[];
   requests: WorkRequest[];
@@ -75,8 +78,37 @@ export default function Timeline({
   messagesReady: boolean;
   onPost: (post: Post) => Promise<boolean>;
   onStatus: (id: string, status: string) => Promise<void>;
+  invoices?: Invoice[];
+  invoiceLines?: InvoiceLine[];
 }) {
-  const entries = buildTimeline(reports, requests, messages, selected);
+  const entries = [
+    ...buildTimeline(reports, requests, messages, selected),
+    ...invoices
+      .filter(
+        (invoice) =>
+          invoice.status === "published" &&
+          invoiceLines.some(
+            (line) =>
+              line.invoice_id === invoice.id && line.property_id === selected,
+          ),
+      )
+      .map((invoice) => ({
+        type: "invoice" as const,
+        invoice,
+        data: {
+          id: invoice.id,
+          property_id: selected,
+          created_at: invoice.published_at!,
+          kind: "請求情報",
+          body: "",
+          author_id: "",
+        },
+      })),
+  ].sort(
+    (a, b) =>
+      Date.parse(a.data.created_at) - Date.parse(b.data.created_at) ||
+      `${a.type}:${a.data.id}`.localeCompare(`${b.type}:${b.data.id}`),
+  );
   const [postKind, setPostKind] = useState(
     profile.role === "customer" ? "お問い合わせ" : "その他メッセージ",
   );
@@ -105,7 +137,9 @@ export default function Timeline({
       <div className="section-title">
         <div>
           <h2>物件のコミュニケーション</h2>
-          <small>報告・ご依頼・メッセージを古い順に表示します。</small>
+          <small>
+            報告・ご依頼・メッセージ・料金案内を古い順に表示します。
+          </small>
         </div>
         <button
           className="quiet"
@@ -136,7 +170,9 @@ export default function Timeline({
                 ? "あなた"
                 : entry.type === "request"
                   ? "顧客"
-                  : "TOIRO · 作業報告";
+                  : entry.type === "invoice"
+                    ? "TOIRO · 料金案内"
+                    : "TOIRO · 作業報告";
           return (
             <article
               className={`chat-entry ${own ? "own" : ""}`}
@@ -164,7 +200,14 @@ export default function Timeline({
                     作業日：{entry.data.performed_on}
                   </small>
                 )}
-                <p className="body">{r.body}</p>
+                {entry.type === "invoice" ? (
+                  <InvoiceDetails
+                    invoice={entry.invoice}
+                    lines={invoiceLines}
+                  />
+                ) : (
+                  <p className="body">{r.body}</p>
+                )}
                 {entry.type === "report" && !!entry.data.urls?.length && (
                   <div className="photos">
                     {entry.data.urls.map((url, index) => (

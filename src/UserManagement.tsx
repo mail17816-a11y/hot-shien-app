@@ -21,11 +21,13 @@ export default function UserManagement({
   currentUserId,
   busy,
   onSave,
+  onContracts,
 }: {
   users: Profile[];
   currentUserId: string;
   busy: boolean;
   onSave: (operation: UserOperation) => Promise<boolean>;
+  onContracts?: (id: string) => void;
 }) {
   const [selected, setSelected] = useState<Profile | null>(null),
     [mode, setMode] = useState<"edit" | "password" | "delete">("edit"),
@@ -185,6 +187,19 @@ export default function UserManagement({
                 </td>
                 <td>
                   <div className="user-actions">
+                    {user.role === "customer" &&
+                      user.active &&
+                      !user.deleted_at &&
+                      onContracts && (
+                        <button
+                          className="quiet"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onContracts(user.id)}
+                        >
+                          契約・請求
+                        </button>
+                      )}
                     {(["edit", "password", "delete"] as const).map((action) => (
                       <button
                         type="button"
