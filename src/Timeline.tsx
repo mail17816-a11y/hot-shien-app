@@ -47,6 +47,12 @@ export type Message = {
 };
 export type Post = { kind: string; workKind: string; body: string };
 const roles = { admin: "管理者", worker: "作業者", customer: "顧客" };
+const displayTypes = [
+  ["report", "作業報告"],
+  ["invoice", "請求情報"],
+  ["request", "作業依頼"],
+  ["message", "メッセージ"],
+] as const;
 const dateTime = (value: string) =>
   new Intl.DateTimeFormat("ja-JP", {
     timeZone: "Asia/Tokyo",
@@ -81,6 +87,12 @@ export default function Timeline({
   invoices?: Invoice[];
   invoiceLines?: InvoiceLine[];
 }) {
+  const [visibleTypes, setVisibleTypes] = useState({
+    report: true,
+    invoice: true,
+    request: true,
+    message: true,
+  });
   const entries = [
     ...buildTimeline(reports, requests, messages, selected),
     ...invoices
@@ -109,6 +121,7 @@ export default function Timeline({
       Date.parse(a.data.created_at) - Date.parse(b.data.created_at) ||
       `${a.type}:${a.data.id}`.localeCompare(`${b.type}:${b.data.id}`),
   );
+  const visibleEntries = entries.filter((entry) => visibleTypes[entry.type]);
   const [postKind, setPostKind] = useState(
     profile.role === "customer" ? "お問い合わせ" : "その他メッセージ",
   );
@@ -150,14 +163,37 @@ export default function Timeline({
           最新へ ↓
         </button>
       </div>
-      {!entries.length && (
-        <div className="empty">
-          まだ投稿がありません。
-          <p>作業報告、ご依頼、メッセージがここに並びます。</p>
+      <fieldset className="timeline-filters">
+        <legend>表示する種類</legend>
+        <div className="timeline-filter-options">
+          {displayTypes.map(([type, label]) => (
+            <label className="checkbox-label" key={type}>
+              <input
+                type="checkbox"
+                checked={visibleTypes[type]}
+                onChange={(event) =>
+                  setVisibleTypes((previous) => ({
+                    ...previous,
+                    [type]: event.target.checked,
+                  }))
+                }
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {!visibleEntries.length && (
+        <div className="empty" role="status">
+          {!Object.values(visibleTypes).some(Boolean)
+            ? "表示する種類を選択してください。"
+            : entries.length
+              ? "選択した種類の投稿はありません。"
+              : "まだ投稿がありません。"}
         </div>
       )}
       <div className="chat-tree" aria-label="物件の投稿一覧">
-        {entries.map((entry) => {
+        {visibleEntries.map((entry) => {
           const r = entry.data;
           const own =
             entry.type === "request"
