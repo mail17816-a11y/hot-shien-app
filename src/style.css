@@ -49,6 +49,9 @@ textarea {
   background: white;
   color: #283f37;
 }
+input[type="checkbox"] {
+  accent-color: #275d50;
+}
 input:focus,
 select:focus,
 textarea:focus {
