@@ -5,6 +5,11 @@ import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
 import UserManagement, { type UserOperation } from "./UserManagement";
 import RequestInbox from "./RequestInbox";
 import ExpenseManagement, { ExpenseInputs, type Expense } from "./Expenses";
+import Billing, {
+  type Contract,
+  type Invoice,
+  type InvoiceLine,
+} from "./Billing";
 import Timeline, {
   type Profile,
   type Property,
@@ -15,6 +20,24 @@ import Timeline, {
 } from "./Timeline";
 const kinds = ["定期巡回", "除草・清掃", "郵便物対応"];
 const roles = { admin: "管理者", worker: "作業者", customer: "顧客" };
+async function allBillingRows<T>(
+  table: string,
+  order = "id",
+  ascending = true,
+) {
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const result = await db!
+      .from(table)
+      .select("*")
+      .order(order, { ascending })
+      .order("id")
+      .range(offset, offset + 499);
+    if (result.error) throw result.error;
+    rows.push(...(result.data as T[]));
+    if (result.data.length < 500) return rows;
+  }
+}
 const errorText = (e: unknown) =>
   e instanceof Error
     ? e.message
@@ -33,6 +56,10 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]),
     [messagesReady, setMessagesReady] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
+  const [billingCustomer, setBillingCustomer] = useState("");
   const [reportFormVersion, setReportFormVersion] = useState(0);
   const [selected, setSelected] = useState(""),
     [propertySearch, setPropertySearch] = useState(""),
@@ -63,6 +90,10 @@ export default function App() {
       setPeople([]);
       setMessages([]);
       setExpenses([]);
+      setContracts([]);
+      setInvoices([]);
+      setInvoiceLines([]);
+      setBillingCustomer("");
       setMessagesReady(false);
       setTab("timeline");
       setSelected("");
@@ -142,6 +173,15 @@ export default function App() {
     );
     if (version !== generation.current) return;
     setReports(hydrated);
+    const [contractRows, invoiceRows, lineRows] = await Promise.all([
+      allBillingRows<Contract>("customer_contracts", "created_at"),
+      allBillingRows<Invoice>("billing_invoices", "period", false),
+      allBillingRows<InvoiceLine>("billing_lines", "category", false),
+    ]);
+    if (version !== generation.current) return;
+    setContracts(contractRows);
+    setInvoices(invoiceRows);
+    setInvoiceLines(lineRows);
     if (p.data.role !== "customer") {
       const all = await db
         .from("profiles")
@@ -150,13 +190,13 @@ export default function App() {
       if (version !== generation.current) return;
       if (all.error) throw all.error;
       setPeople(all.data);
-      const cost = await db
-        .from("report_expenses")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const cost = await allBillingRows<Expense>(
+        "report_expenses",
+        "created_at",
+        false,
+      );
       if (version !== generation.current) return;
-      if (cost.error) throw cost.error;
-      setExpenses(cost.data);
+      setExpenses(cost);
     }
   }
   useEffect(() => {
@@ -458,6 +498,7 @@ export default function App() {
                   ["properties", "物件管理"],
                   ["users", "ユーザー管理"],
                   ["expenses", "実費管理"],
+                  ["billing", "契約・請求管理"],
                 ]
               : []),
           ].map(([key, label]) => (
@@ -505,7 +546,9 @@ export default function App() {
                       ? "物件管理"
                       : tab === "expenses"
                         ? "実費管理"
-                        : "ユーザー管理"}
+                        : tab === "billing"
+                          ? "契約・請求管理"
+                          : "ユーザー管理"}
             </h1>
           </div>
           <button
@@ -581,6 +624,8 @@ export default function App() {
                 reports={reports}
                 requests={requests}
                 messages={messages}
+                invoices={invoices}
+                invoiceLines={invoiceLines}
                 properties={properties}
                 selected={selected}
                 profile={profile}
@@ -852,6 +897,29 @@ export default function App() {
                 }
               />
             )}
+            {tab === "billing" && profile.role === "admin" && (
+              <Billing
+                users={people}
+                properties={properties}
+                contracts={contracts}
+                invoices={invoices}
+                lines={invoiceLines}
+                expenses={expenses}
+                reports={reports}
+                customerId={billingCustomer}
+                onCustomer={setBillingCustomer}
+                busy={busy}
+                onAction={(kind, data) =>
+                  action(async () => {
+                    const result = await db!.rpc("billing_action", {
+                      p_action: kind,
+                      p_data: data,
+                    });
+                    if (result.error) throw result.error;
+                  })
+                }
+              />
+            )}
             {tab === "users" && profile.role === "admin" && (
               <section className="panel">
                 <UserManagement
@@ -859,6 +927,10 @@ export default function App() {
                   currentUserId={profile.id}
                   busy={busy}
                   onSave={saveUser}
+                  onContracts={(id) => {
+                    setBillingCustomer(id);
+                    setTab("billing");
+                  }}
                 />
               </section>
             )}
