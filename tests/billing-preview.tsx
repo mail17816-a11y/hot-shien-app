@@ -95,6 +95,18 @@ function Preview() {
                   published_at: new Date().toISOString(),
                 })),
               );
+            if (action === "cancel")
+              setInvoices(
+                invoices.map((invoice) =>
+                  invoice.id === data.id
+                    ? {
+                        ...invoice,
+                        status: "cancelled",
+                        cancelled_at: new Date().toISOString(),
+                      }
+                    : invoice,
+                ),
+              );
             if (action === "contract")
               setContracts([
                 ...contracts,
