@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import BillingNotice from "./BillingNotice";
 import type { Property, Report } from "./Timeline";
 
 export type Expense = {
@@ -115,8 +116,9 @@ export default function ExpenseManagement({
   return (
     <section className="panel">
       <h2>作業報告の実費一覧</h2>
+      <BillingNotice />
       <p className="muted">
-        請求情報の作成前に、項目と金額を確認・修正します。実費の記録だけでは顧客には表示されません。
+        請求情報の作成前に、項目と金額を確認・修正します。実費は顧客の作業報告にも目安として表示されます。
       </p>
       <label>
         実費を検索

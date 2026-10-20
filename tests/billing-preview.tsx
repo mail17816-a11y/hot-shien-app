@@ -158,6 +158,29 @@ function Preview() {
           messagesReady={true}
           invoices={invoices}
           invoiceLines={lines}
+          expenses={[
+            {
+              id: "preview-postage",
+              report_id: "sample-report",
+              item: "郵送代",
+              amount_yen: 430,
+              billed_at: null,
+            },
+            {
+              id: "preview-disposal",
+              report_id: "sample-report",
+              item: "処分費",
+              amount_yen: 1200,
+              billed_at: null,
+            },
+            {
+              id: "preview-other",
+              report_id: "other-report",
+              item: "他の報告の実費",
+              amount_yen: 999,
+              billed_at: null,
+            },
+          ]}
           onPost={async () => false}
           onStatus={async () => {}}
         />

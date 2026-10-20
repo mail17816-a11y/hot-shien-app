@@ -690,3 +690,25 @@ fieldset {
   margin: 0;
   font-size: 14px;
 }
+
+.billing-notice {
+  display: block;
+  color: #768078;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.report-expenses {
+  border-top: 1px solid #d6dfd8;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.report-expenses h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+.report-expenses ul {
+  padding-left: 20px;
+  margin: 8px 0;
+}

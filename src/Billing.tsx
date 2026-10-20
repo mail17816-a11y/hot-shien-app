@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import BillingNotice from "./BillingNotice";
 import type { Profile, Property, Report } from "./Timeline";
 import type { Expense } from "./Expenses";
 
@@ -63,6 +64,7 @@ export function InvoiceDetails({
   return (
     <div className="invoice-details">
       <h3>{invoice.period.slice(0, 7)}分の料金案内</h3>
+      <BillingNotice />
       <small>
         顧客ごとの合計です。複数物件の契約がある場合は、その内訳も表示します。
       </small>
@@ -453,6 +455,7 @@ export default function Billing({
             <p>
               対象月に適用される定額料金を自動で取り込みます。実費は対象月までの未請求分から選択します。
             </p>
+            {eligible.length > 0 && <BillingNotice />}
             {eligible.map(({ expense, report }) => (
               <label className="checkbox-label" key={expense.id}>
                 <input
