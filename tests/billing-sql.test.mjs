@@ -88,6 +88,7 @@ test("契約・請求の保存、顧客分離、年払い、実費ロック、�
       "20261018230614_report_expenses.sql",
       "20261018232719_customer_contract_billing.sql",
       "20261019090103_withdraw_billing_invoice.sql",
+      "20261020094003_flexible_billing_cycles.sql",
     ])
       await db.exec(
         await readFile(
@@ -376,6 +377,85 @@ test("契約・請求の保存、顧客分離、年払い、実費ロック、�
     await assert.rejects(
       as(admin, () => call("invoice", bill("2026-12-01", [expense]))),
       /選択した実費/,
+    );
+    // Separate future periods keep existing publication/cancellation checks intact.
+    const once = await as(admin, () =>
+      call(
+        "contract",
+        contract({
+          billing_cycle: "once",
+          effective_from: "2028-02-01",
+          item: "単発",
+          amount_yen: 123,
+        }),
+      ),
+    );
+    const customData = contract({
+      billing_cycle: "custom",
+      effective_from: "2028-01-01",
+      item: "指定月",
+      amount_yen: 234,
+      payment_months: ["2028-02-01", "2029-03-01", "2028-02-01"],
+    });
+    const custom = await as(admin, () => call("contract", customData));
+    for (const invalid of [[], ["2028-02-02"], ["2027-12-01"], [null]]) {
+      await assert.rejects(
+        as(admin, () =>
+          call("contract", { ...customData, payment_months: invalid }),
+        ),
+        /支払い月/,
+      );
+    }
+    for (const [month, expected] of [
+      ["2028-02-01", 1057],
+      ["2028-03-01", 700],
+      ["2029-02-01", 700],
+      ["2029-03-01", 934],
+    ]) {
+      const draft = await as(admin, () => call("invoice", bill(month)));
+      assert.equal(await total(draft), expected, month);
+      await as(admin, () => call("invoice", bill(month)));
+      assert.equal(await total(draft), expected, "再作成でも重複しない");
+    }
+    await as(admin, () =>
+      call("contract", {
+        ...customData,
+        id: custom,
+        payment_months: ["2029-04-01"],
+      }),
+    );
+    const changed = await as(admin, () => call("invoice", bill("2029-03-01")));
+    assert.equal(await total(changed), 700, "選択解除した月は請求されない");
+    await as(admin, () =>
+      call("contract", { ...customData, id: custom, billing_cycle: "monthly" }),
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select cardinality(payment_months) n from public.customer_contracts where id=$1",
+          [custom],
+        )
+      ).rows[0].n,
+      0,
+    );
+    const onceDraft = await as(admin, () =>
+      call("invoice", bill("2028-02-01")),
+    );
+    await as(admin, () => call("publish", { id: onceDraft }));
+    await as(admin, () =>
+      call("cancel", { id: onceDraft, customer_id: customer }),
+    );
+    const onceReplacement = await as(admin, () =>
+      call("invoice", bill("2028-02-01")),
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select count(*)::int n from public.billing_lines where invoice_id=$1 and contract_id=$2",
+          [onceReplacement, once],
+        )
+      ).rows[0].n,
+      1,
     );
     await db.query("update public.profiles set active=false where id=$1", [
       admin,

@@ -8,7 +8,8 @@ export type Contract = {
   property_id: string;
   item: string;
   amount_yen: number;
-  billing_cycle: "monthly" | "annual";
+  billing_cycle: "monthly" | "annual" | "once" | "custom";
+  payment_months?: string[];
   starts_on: string;
   ends_on: string | null;
   effective_from: string;
@@ -103,6 +104,105 @@ export function InvoiceDetails({
   );
 }
 
+function PaymentSchedule({ contract }: { contract: Contract | null }) {
+  const [cycle, setCycle] = useState(contract?.billing_cycle || "monthly");
+  const [months, setMonths] = useState<string[]>(
+    contract?.payment_months || [],
+  );
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(
+    Number(contract?.payment_months?.[0]?.slice(0, 4)) || currentYear,
+  );
+  const years = [
+    ...new Set([
+      ...Array.from({ length: 21 }, (_, i) => currentYear - 10 + i),
+      ...months.map((month) => Number(month.slice(0, 4))),
+      year,
+    ]),
+  ].sort((a, b) => a - b);
+  return (
+    <div className="payment-schedule">
+      <label>
+        支払い周期
+        <select
+          name="billing_cycle"
+          value={cycle}
+          onChange={(e) =>
+            setCycle(e.target.value as Contract["billing_cycle"])
+          }
+        >
+          <option value="monthly">毎月</option>
+          <option value="annual">年1回（適用開始月と同じ月）</option>
+          <option value="once">一回のみ（適用開始月）</option>
+          <option value="custom">カスタム</option>
+        </select>
+      </label>
+      {cycle === "custom" && (
+        <>
+          <label>
+            支払い年
+            <select
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+            >
+              {years.map((value) => (
+                <option key={value} value={value}>
+                  {value}年
+                </option>
+              ))}
+            </select>
+          </label>
+          <div
+            className="payment-months"
+            role="group"
+            aria-label={`${year}年の支払い月`}
+          >
+            {Array.from({ length: 12 }, (_, i) => {
+              const month = `${year}-${String(i + 1).padStart(2, "0")}-01`;
+              const selected = months.includes(month);
+              return (
+                <button
+                  key={month}
+                  type="button"
+                  className={selected ? "" : "quiet"}
+                  aria-pressed={selected}
+                  onClick={() =>
+                    setMonths(
+                      selected
+                        ? months.filter((value) => value !== month)
+                        : [...months, month].sort(),
+                    )
+                  }
+                >
+                  {i + 1}月
+                </button>
+              );
+            })}
+          </div>
+          <small>
+            選択した年月ごとに、合意済みの請求額を計上します。年を切り替えて複数年を選べます。
+          </small>
+          <p aria-live="polite">
+            選択済み：
+            {months.length
+              ? months.map((month) => month.slice(0, 7)).join("、")
+              : "なし（1か月以上選択してください）"}
+          </p>
+          {months.map((month) => (
+            <input
+              key={month}
+              type="hidden"
+              name="payment_months"
+              value={month}
+            />
+          ))}
+        </>
+      )}
+      {cycle === "once" && <small>料金の適用開始月に1回だけ計上します。</small>}
+    </div>
+  );
+}
+
 export default function Billing({
   users,
   properties,
@@ -171,6 +271,13 @@ export default function Billing({
   async function saveContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    if (
+      data.get("billing_cycle") === "custom" &&
+      !data.getAll("payment_months").length
+    ) {
+      window.alert("支払い月を1か月以上選択してください。");
+      return;
+    }
     const saved = await onAction("contract", {
       id: editing?.id || "",
       customer_id: customerId,
@@ -178,6 +285,7 @@ export default function Billing({
       item: String(data.get("item")).trim(),
       amount_yen: Number(data.get("amount_yen")),
       billing_cycle: data.get("billing_cycle"),
+      payment_months: data.getAll("payment_months"),
       starts_on: data.get("starts_on"),
       ends_on: data.get("ends_on"),
       effective_from: `${data.get("effective_from")}-01`,
@@ -311,19 +419,8 @@ export default function Billing({
                         required
                       />
                     </label>
-                    <label>
-                      請求周期
-                      <select
-                        name="billing_cycle"
-                        defaultValue={editing?.billing_cycle || "monthly"}
-                      >
-                        <option value="monthly">毎月</option>
-                        <option value="annual">
-                          年1回（適用開始月と同じ月）
-                        </option>
-                      </select>
-                    </label>
                   </div>
+                  <PaymentSchedule contract={editing} />
                   <div className="row">
                     <label>
                       契約開始日
@@ -411,7 +508,21 @@ export default function Billing({
                       <td>{contract.item}</td>
                       <td>
                         {yen(contract.amount_yen)} /{" "}
-                        {contract.billing_cycle === "monthly" ? "月" : "年"}
+                        {
+                          {
+                            monthly: "毎月",
+                            annual: "年1回",
+                            once: "一回のみ",
+                            custom: "カスタム",
+                          }[contract.billing_cycle]
+                        }
+                        {contract.billing_cycle === "custom" && (
+                          <small>
+                            {contract.payment_months
+                              ?.map((month) => month.slice(0, 7))
+                              .join("、")}
+                          </small>
+                        )}
                       </td>
                       <td>
                         {contract.starts_on} ～ {contract.ends_on || "継続"}
