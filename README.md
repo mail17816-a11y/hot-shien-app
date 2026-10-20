@@ -8,7 +8,7 @@ TOIROの物件定期巡回管理サービス。TypeScript / React / Vite / Supab
 
 ## ローカル起動
 
-Node.js 22.12以上で、`npm ci` を実行します。`.env.example` を `.env.local` にコピーし、公開キーを設定して `npm run dev`。本番ビルドは `npm run build`。
+Node.js 24系で、`npm ci` を実行します。`.env.example` を `.env.local` にコピーし、公開キーを設定して `npm run dev`。本番ビルドは `npm run build`。
 
 ## Supabase初期設定
 
