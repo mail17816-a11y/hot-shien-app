@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase as db } from "./supabase";
 import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
+import ScreenNavigation from "./ScreenNavigation";
 import UserManagement, { type UserOperation } from "./UserManagement";
 import RequestInbox from "./RequestInbox";
 import ExpenseManagement, { ExpenseInputs, type Expense } from "./Expenses";
@@ -173,15 +174,18 @@ export default function App() {
     );
     if (version !== generation.current) return;
     setReports(hydrated);
-    const [contractRows, invoiceRows, lineRows] = await Promise.all([
-      allBillingRows<Contract>("customer_contracts", "created_at"),
-      allBillingRows<Invoice>("billing_invoices", "period", false),
-      allBillingRows<InvoiceLine>("billing_lines", "category", false),
-    ]);
+    const [contractRows, invoiceRows, lineRows, expenseRows] =
+      await Promise.all([
+        allBillingRows<Contract>("customer_contracts", "created_at"),
+        allBillingRows<Invoice>("billing_invoices", "period", false),
+        allBillingRows<InvoiceLine>("billing_lines", "category", false),
+        allBillingRows<Expense>("report_expenses", "created_at", false),
+      ]);
     if (version !== generation.current) return;
     setContracts(contractRows);
     setInvoices(invoiceRows);
     setInvoiceLines(lineRows);
+    setExpenses(expenseRows);
     if (p.data.role !== "customer") {
       const all = await db
         .from("profiles")
@@ -190,13 +194,6 @@ export default function App() {
       if (version !== generation.current) return;
       if (all.error) throw all.error;
       setPeople(all.data);
-      const cost = await allBillingRows<Expense>(
-        "report_expenses",
-        "created_at",
-        false,
-      );
-      if (version !== generation.current) return;
-      setExpenses(cost);
     }
   }
   useEffect(() => {
@@ -481,7 +478,7 @@ export default function App() {
           <i>●</i>
         </div>
         <span className="eyebrow">物件定期巡回管理</span>
-        <nav>
+        <ScreenNavigation screen={tab}>
           {[
             ["timeline", "コミュニケーション"],
             [
@@ -504,13 +501,14 @@ export default function App() {
           ].map(([key, label]) => (
             <button
               className={tab === key ? "active" : ""}
+              aria-current={tab === key ? "page" : undefined}
               onClick={() => setTab(key)}
               key={key}
             >
               {label}
             </button>
           ))}
-        </nav>
+        </ScreenNavigation>
         <div className="account">
           <b>
             {profile
@@ -626,6 +624,7 @@ export default function App() {
                 messages={messages}
                 invoices={invoices}
                 invoiceLines={invoiceLines}
+                expenses={expenses}
                 properties={properties}
                 selected={selected}
                 profile={profile}
