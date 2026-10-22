@@ -176,7 +176,7 @@ aside {
 aside > .eyebrow {
   margin-top: 8px;
 }
-.navigation-hint {
+.navigation-scroll-track {
   display: none;
 }
 nav {
@@ -402,7 +402,7 @@ footer {
     min-width: 0;
     overflow-x: auto;
     overscroll-behavior-x: contain;
-    scrollbar-width: thin;
+    scrollbar-width: none;
     margin-top: 15px;
     padding: 2px 0 6px;
   }
@@ -416,10 +416,24 @@ footer {
     line-height: 1.5;
     white-space: nowrap;
   }
-  .navigation-hint {
+  nav::-webkit-scrollbar {
+    display: none;
+  }
+  .navigation-scroll-track {
     display: block;
+    position: relative;
+    height: 3px;
     margin-top: 4px;
-    font-size: 11px;
+    background: #f3eadc;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .navigation-scroll-thumb {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: #d99432;
+    border-radius: inherit;
   }
   .account {
     display: flex;
