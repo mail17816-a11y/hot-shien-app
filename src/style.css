@@ -690,3 +690,27 @@ fieldset {
   margin: 0;
   font-size: 14px;
 }
+
+.payment-months {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.payment-months button {
+  min-height: 44px;
+  padding: 8px;
+}
+.payment-months button[aria-pressed="true"] {
+  background: #245b42;
+  color: white;
+  border: 2px solid #163e2c;
+}
+.payment-schedule {
+  margin-bottom: 16px;
+}
+@media (max-width: 480px) {
+  .payment-months {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
