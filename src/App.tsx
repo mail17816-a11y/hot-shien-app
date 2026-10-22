@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase as db } from "./supabase";
 import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
+import ScreenNavigation from "./ScreenNavigation";
 import UserManagement, { type UserOperation } from "./UserManagement";
 import RequestInbox from "./RequestInbox";
 import ExpenseManagement, { ExpenseInputs, type Expense } from "./Expenses";
@@ -481,7 +482,7 @@ export default function App() {
           <i>●</i>
         </div>
         <span className="eyebrow">物件定期巡回管理</span>
-        <nav aria-label="画面切り替え">
+        <ScreenNavigation screen={tab}>
           {[
             ["timeline", "コミュニケーション"],
             [
@@ -511,7 +512,7 @@ export default function App() {
               {label}
             </button>
           ))}
-        </nav>
+        </ScreenNavigation>
         <div className="account">
           <b>
             {profile
