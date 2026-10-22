@@ -117,7 +117,7 @@ small {
 .login {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
   gap: 10%;
   padding: 8% 12%;
@@ -160,7 +160,7 @@ small {
 }
 .app {
   display: grid;
-  grid-template-columns: 250px 1fr;
+  grid-template-columns: 250px minmax(0, 1fr);
   min-height: 100vh;
 }
 aside {
@@ -207,6 +207,7 @@ nav button.active {
   font-size: 12px;
 }
 .content {
+  min-width: 0;
   max-width: 1150px;
   width: 100%;
   padding: 40px 55px;
@@ -222,7 +223,7 @@ header h1 {
 }
 .summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
   margin: 7px 0 30px;
 }
@@ -309,7 +310,7 @@ time {
 }
 .photos {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 20px;
 }
@@ -332,7 +333,7 @@ time {
 }
 .row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 15px;
 }
 .person {
@@ -368,7 +369,7 @@ footer {
     padding: 25px;
   }
   .app {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   aside {
     position: static;
@@ -421,7 +422,7 @@ footer {
     padding: 20px;
   }
   .photos {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .row {
     grid-template-columns: 1fr;
@@ -532,6 +533,8 @@ fieldset {
   }
 }
 .inbox-scroll {
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid #dfe7de;
   border-radius: 12px;
@@ -689,4 +692,24 @@ fieldset {
 .timeline-filter-options .checkbox-label {
   margin: 0;
   font-size: 14px;
+}
+
+/* Keep intrinsic table/form widths inside their grid tracks. */
+.app > *,
+.login > *,
+.row > *,
+.summary > *,
+.photos > * {
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  /* iOS zooms focused controls when their font is smaller than 16px. */
+  input,
+  select,
+  textarea,
+  .inbox-table select {
+    font-size: 16px;
+    min-width: 0;
+    max-width: 100%;
+  }
 }
