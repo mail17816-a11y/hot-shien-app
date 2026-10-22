@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { buildTimeline } from "./feed";
-import { InvoiceDetails, type Invoice, type InvoiceLine } from "./Billing";
+import { InvoiceDetails, yen, type Invoice, type InvoiceLine } from "./Billing";
+import type { Expense } from "./Expenses";
+import BillingNotice from "./BillingNotice";
 
 export type Profile = {
   id: string;
@@ -73,6 +75,7 @@ export default function Timeline({
   onStatus,
   invoices = [],
   invoiceLines = [],
+  expenses = [],
 }: {
   reports: Report[];
   requests: WorkRequest[];
@@ -86,6 +89,7 @@ export default function Timeline({
   onStatus: (id: string, status: string) => Promise<void>;
   invoices?: Invoice[];
   invoiceLines?: InvoiceLine[];
+  expenses?: Expense[];
 }) {
   const [visibleTypes, setVisibleTypes] = useState({
     report: true,
@@ -93,6 +97,12 @@ export default function Timeline({
     request: true,
     message: true,
   });
+  const expensesByReport = new Map<string, Expense[]>();
+  for (const expense of expenses) {
+    const rows = expensesByReport.get(expense.report_id) || [];
+    rows.push(expense);
+    expensesByReport.set(expense.report_id, rows);
+  }
   const entries = [
     ...buildTimeline(reports, requests, messages, selected),
     ...invoices
@@ -195,6 +205,8 @@ export default function Timeline({
       <div className="chat-tree" aria-label="物件の投稿一覧">
         {visibleEntries.map((entry) => {
           const r = entry.data;
+          const reportExpenses =
+            entry.type === "report" ? expensesByReport.get(r.id) || [] : [];
           const own =
             entry.type === "request"
               ? entry.data.customer_id === profile.id
@@ -243,6 +255,31 @@ export default function Timeline({
                   />
                 ) : (
                   <p className="body">{r.body}</p>
+                )}
+                {reportExpenses.length > 0 && (
+                  <section
+                    className="report-expenses"
+                    aria-label="作業報告の実費請求"
+                  >
+                    <h3>実費請求</h3>
+                    <ul>
+                      {reportExpenses.map((expense) => (
+                        <li key={expense.id}>
+                          {expense.item}：{yen(expense.amount_yen)}
+                        </li>
+                      ))}
+                    </ul>
+                    <p>
+                      実費合計：
+                      {yen(
+                        reportExpenses.reduce(
+                          (sum, expense) => sum + expense.amount_yen,
+                          0,
+                        ),
+                      )}
+                    </p>
+                    <BillingNotice />
+                  </section>
                 )}
                 {entry.type === "report" && !!entry.data.urls?.length && (
                   <div className="photos">

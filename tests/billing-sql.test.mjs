@@ -89,6 +89,7 @@ test("契約・請求の保存、顧客分離、年払い、実費ロック、�
       "20261018232719_customer_contract_billing.sql",
       "20261019090103_withdraw_billing_invoice.sql",
       "20261020094003_flexible_billing_cycles.sql",
+      "20261020100826_customer_report_expenses.sql",
     ])
       await db.exec(
         await readFile(
@@ -134,6 +135,45 @@ test("契約・請求の保存、顧客分離、年払い、実費ロック、�
       as(admin, () => call("contract", contract({ property_id: foreign }))),
       /対象顧客/,
     );
+    await as(customer, async () => {
+      const rows = (
+        await db.query(
+          "select * from public.report_expenses order by amount_yen",
+        )
+      ).rows;
+      assert.deepEqual(
+        rows.map((row) => row.amount_yen),
+        [200, 430],
+        "公開前も自分の物件の実費だけ閲覧できる",
+      );
+      assert.equal(
+        (
+          await db.query(
+            "update public.report_expenses set amount_yen=1 returning id",
+          )
+        ).rows.length,
+        0,
+        "顧客は実費を修正できない",
+      );
+    });
+    await assert.rejects(
+      as(customer, () =>
+        db.query(
+          "insert into public.report_expenses(report_id,item,amount_yen) values($1,'不正',1)",
+          [id(20)],
+        ),
+      ),
+      /row-level security/,
+    );
+    await as(other, async () => {
+      assert.deepEqual(
+        (
+          await db.query("select amount_yen from public.report_expenses")
+        ).rows.map((row) => row.amount_yen),
+        [100],
+        "他顧客の実費は閲覧できない",
+      );
+    });
     const monthly = await as(admin, () => call("contract", contract()));
     await as(admin, () =>
       call(
