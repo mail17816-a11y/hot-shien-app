@@ -176,7 +176,7 @@ aside {
 aside > .eyebrow {
   margin-top: 8px;
 }
-.navigation-hint {
+.navigation-scroll-track {
   display: none;
 }
 nav {
@@ -217,11 +217,19 @@ nav button.active {
   margin: 0 auto;
 }
 header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
 }
+header > div {
+  min-width: 0;
+}
+header > button {
+  white-space: nowrap;
+}
 header h1 {
+  overflow-wrap: anywhere;
   margin-bottom: 30px;
 }
 .summary {
@@ -394,7 +402,7 @@ footer {
     min-width: 0;
     overflow-x: auto;
     overscroll-behavior-x: contain;
-    scrollbar-width: thin;
+    scrollbar-width: none;
     margin-top: 15px;
     padding: 2px 0 6px;
   }
@@ -408,10 +416,24 @@ footer {
     line-height: 1.5;
     white-space: nowrap;
   }
-  .navigation-hint {
+  nav::-webkit-scrollbar {
+    display: none;
+  }
+  .navigation-scroll-track {
     display: block;
+    position: relative;
+    height: 3px;
     margin-top: 4px;
-    font-size: 11px;
+    background: #f3eadc;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .navigation-scroll-thumb {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: #d99432;
+    border-radius: inherit;
   }
   .account {
     display: flex;
@@ -778,4 +800,17 @@ fieldset {
 .report-expenses ul {
   padding-left: 20px;
   margin: 8px 0;
+}
+
+.reception > .section-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+.reception > .section-title > div {
+  min-width: 0;
+}
+.reception > .section-title > span {
+  white-space: nowrap;
 }
