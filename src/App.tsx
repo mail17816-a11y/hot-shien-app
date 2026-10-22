@@ -481,7 +481,7 @@ export default function App() {
           <i>●</i>
         </div>
         <span className="eyebrow">物件定期巡回管理</span>
-        <nav>
+        <nav aria-label="画面切り替え">
           {[
             ["timeline", "コミュニケーション"],
             [
@@ -504,6 +504,7 @@ export default function App() {
           ].map(([key, label]) => (
             <button
               className={tab === key ? "active" : ""}
+              aria-current={tab === key ? "page" : undefined}
               onClick={() => setTab(key)}
               key={key}
             >
