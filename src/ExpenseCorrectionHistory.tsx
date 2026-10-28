@@ -14,6 +14,7 @@ export type ExpenseCorrection = Correction & {
   report_id: string;
   property_id: string;
   actor_id: string;
+  customer_visible?: boolean;
 };
 export type InvoiceLineCorrection = Correction & {
   invoice_id: string;

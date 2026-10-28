@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { buildTimeline } from "./feed";
+import {
+  InspectionReportDetails,
+  ReportRevisionHistory,
+} from "./InspectionReportDetails";
+import type {
+  InspectionSubject,
+  InspectionItem,
+  InspectionResult,
+  ReportRevision,
+} from "./inspections";
 import { InvoiceDetails, yen, type Invoice, type InvoiceLine } from "./Billing";
 import type { Expense } from "./Expenses";
 import BillingNotice from "./BillingNotice";
@@ -33,6 +43,14 @@ export type Report = {
   created_at: string;
   photo_paths: string[];
   urls?: string[];
+  publication_status?: "draft" | "published";
+  published_at?: string | null;
+  revision?: number;
+  inspection_version?: number | null;
+  work_status?: "completed" | "not_performed";
+  not_performed_reason?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
 };
 export type WorkRequest = {
   id: string;
@@ -86,6 +104,11 @@ export default function Timeline({
   invoiceCorrections = [],
   focusedReportId = "",
   onOpenReport,
+  onEditReport,
+  inspectionSubjects = [],
+  inspectionItems = [],
+  inspectionResults = [],
+  reportRevisions = [],
 }: {
   reports: Report[];
   requests: WorkRequest[];
@@ -104,6 +127,11 @@ export default function Timeline({
   invoiceCorrections?: InvoiceLineCorrection[];
   focusedReportId?: string;
   onOpenReport?: (id: string) => void;
+  onEditReport?: (report: Report) => void;
+  inspectionSubjects?: InspectionSubject[];
+  inspectionItems?: InspectionItem[];
+  inspectionResults?: InspectionResult[];
+  reportRevisions?: ReportRevision[];
 }) {
   const [visibleTypes, setVisibleTypes] = useState({
     report: true,
@@ -119,20 +147,39 @@ export default function Timeline({
   }
   const entries = [
     ...buildTimeline(
-      reports,
+      reports.map((report) => ({
+        ...report,
+        created_at: report.published_at || report.created_at,
+      })),
       requests,
       [
         ...messages,
-        ...expenseCorrections.map((correction) => ({
-          id: `correction-${correction.id}`,
-          property_id: correction.property_id,
-          author_id: correction.actor_id,
-          author_role: "admin" as const,
-          kind: "報告の訂正",
-          body: "報告内容を訂正しました。",
-          created_at: correction.created_at,
-          report_id: correction.report_id,
-        })),
+        ...reportRevisions
+          .filter((revision) => revision.customer_visible)
+          .map((revision) => ({
+            id: `report-revision-${revision.id}`,
+            property_id:
+              reports.find((r) => r.id === revision.report_id)?.property_id ||
+              "",
+            author_id: revision.actor_id,
+            author_role: revision.actor_role,
+            kind: "報告の訂正",
+            body: "報告内容を訂正しました。",
+            created_at: revision.created_at,
+            report_id: revision.report_id,
+          })),
+        ...expenseCorrections
+          .filter((correction) => correction.customer_visible !== false)
+          .map((correction) => ({
+            id: `correction-${correction.id}`,
+            property_id: correction.property_id,
+            author_id: correction.actor_id,
+            author_role: "admin" as const,
+            kind: "報告の訂正",
+            body: "報告内容を訂正しました。",
+            created_at: correction.created_at,
+            report_id: correction.report_id,
+          })),
       ],
       selected,
     ),
@@ -327,6 +374,16 @@ export default function Timeline({
                     </a>
                   </p>
                 )}
+                {entry.type === "report" && (
+                  <InspectionReportDetails
+                    report={entry.data}
+                    subjects={inspectionSubjects}
+                    items={inspectionItems}
+                    results={inspectionResults.filter(
+                      (row) => row.report_id === r.id,
+                    )}
+                  />
+                )}
                 {reportExpenses.length > 0 && (
                   <section
                     className="report-expenses"
@@ -354,20 +411,57 @@ export default function Timeline({
                 )}
                 {entry.type === "report" && !!entry.data.urls?.length && (
                   <div className="photos">
-                    {entry.data.urls.map((url, index) => (
-                      <a href={url} target="_blank" rel="noreferrer" key={url}>
-                        <img
-                          src={url}
-                          alt={`${r.kind}の報告写真 ${index + 1}`}
-                          loading="lazy"
-                        />
-                      </a>
-                    ))}
+                    {entry.data.urls.map(
+                      (url, index) =>
+                        url && (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            key={url}
+                          >
+                            <img
+                              src={url}
+                              alt={`${r.kind}の報告写真 ${index + 1}`}
+                              loading="lazy"
+                            />
+                          </a>
+                        ),
+                    )}
                   </div>
                 )}
                 {entry.type === "report" && (
                   <>
-                    <small>作成日時：{correctionDate(r.created_at)}</small>
+                    <small>
+                      作成日時：
+                      {correctionDate(
+                        reports.find((report) => report.id === r.id)
+                          ?.created_at || r.created_at,
+                      )}
+                    </small>
+                    <ReportRevisionHistory
+                      revisions={reportRevisions.filter(
+                        (row) => row.report_id === r.id,
+                      )}
+                      subjects={inspectionSubjects}
+                      items={inspectionItems}
+                    />
+                    {onEditReport &&
+                      (profile.role === "admin" ||
+                        (profile.role === "worker" &&
+                          entry.data.author_id === profile.id)) && (
+                        <button
+                          className="quiet"
+                          disabled={busy}
+                          onClick={() =>
+                            onEditReport(
+                              reports.find((report) => report.id === r.id)!,
+                            )
+                          }
+                        >
+                          報告を編集
+                        </button>
+                      )}
                     <ExpenseCorrectionHistory
                       corrections={expenseCorrections.filter(
                         (correction) => correction.report_id === r.id,

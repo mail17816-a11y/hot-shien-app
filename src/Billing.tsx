@@ -276,6 +276,7 @@ export default function Billing({
     .filter(
       ({ expense, report }) =>
         report &&
+        report.publication_status !== "draft" &&
         ownProperties.some((property) => property.id === report.property_id) &&
         report.performed_on.slice(0, 7) <= period &&
         (!expense.billed_at || attached.has(expense.id)),
