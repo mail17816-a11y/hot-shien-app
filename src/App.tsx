@@ -3,6 +3,10 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase as db } from "./supabase";
 import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
 import ScreenNavigation from "./ScreenNavigation";
+import type {
+  ExpenseCorrection,
+  InvoiceLineCorrection,
+} from "./ExpenseCorrectionHistory";
 import UserManagement, { type UserOperation } from "./UserManagement";
 import RequestInbox from "./RequestInbox";
 import ExpenseManagement, { ExpenseInputs, type Expense } from "./Expenses";
@@ -57,6 +61,14 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]),
     [messagesReady, setMessagesReady] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expenseCorrections, setExpenseCorrections] = useState<
+    ExpenseCorrection[]
+  >([]);
+  const [invoiceCorrections, setInvoiceCorrections] = useState<
+    InvoiceLineCorrection[]
+  >([]);
+  const [focusedReportId, setFocusedReportId] = useState("");
+  const lastReportHash = useRef("");
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
@@ -91,6 +103,10 @@ export default function App() {
       setPeople([]);
       setMessages([]);
       setExpenses([]);
+      setExpenseCorrections([]);
+      setInvoiceCorrections([]);
+      setFocusedReportId("");
+      lastReportHash.current = "";
       setContracts([]);
       setInvoices([]);
       setInvoiceLines([]);
@@ -104,6 +120,43 @@ export default function App() {
       data.subscription.unsubscribe();
     };
   }, []);
+  function clearReportFocus() {
+    setFocusedReportId("");
+    if (window.location.hash.startsWith("#report-")) {
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+    lastReportHash.current = "";
+  }
+  function openReport(id: string) {
+    const report = reports.find((row) => row.id === id);
+    if (!report) return;
+    setTab("timeline");
+    setSelected(report.property_id);
+    setFocusedReportId(id);
+    window.history.replaceState(null, "", `#report-${id}`);
+    lastReportHash.current = window.location.hash;
+  }
+  useEffect(() => {
+    function followReportLink() {
+      const hash = window.location.hash;
+      if (!hash.startsWith("#report-") || hash === lastReportHash.current)
+        return;
+      const id = hash.slice(8);
+      const report = reports.find((row) => row.id === id);
+      if (!report) return;
+      setTab("timeline");
+      setSelected(report.property_id);
+      setFocusedReportId(id);
+      lastReportHash.current = hash;
+    }
+    followReportLink();
+    window.addEventListener("hashchange", followReportLink);
+    return () => window.removeEventListener("hashchange", followReportLink);
+  }, [reports]);
   async function load() {
     if (!db || !session) return;
     const version = generation.current;
@@ -174,18 +227,36 @@ export default function App() {
     );
     if (version !== generation.current) return;
     setReports(hydrated);
-    const [contractRows, invoiceRows, lineRows, expenseRows] =
-      await Promise.all([
-        allBillingRows<Contract>("customer_contracts", "created_at"),
-        allBillingRows<Invoice>("billing_invoices", "period", false),
-        allBillingRows<InvoiceLine>("billing_lines", "category", false),
-        allBillingRows<Expense>("report_expenses", "created_at", false),
-      ]);
+    const [
+      contractRows,
+      invoiceRows,
+      lineRows,
+      expenseRows,
+      correctionRows,
+      invoiceCorrectionRows,
+    ] = await Promise.all([
+      allBillingRows<Contract>("customer_contracts", "created_at"),
+      allBillingRows<Invoice>("billing_invoices", "period", false),
+      allBillingRows<InvoiceLine>("billing_lines", "category", false),
+      allBillingRows<Expense>("report_expenses", "created_at", false),
+      allBillingRows<ExpenseCorrection>(
+        "expense_corrections",
+        "created_at",
+        false,
+      ),
+      allBillingRows<InvoiceLineCorrection>(
+        "invoice_line_corrections",
+        "created_at",
+        false,
+      ),
+    ]);
     if (version !== generation.current) return;
     setContracts(contractRows);
     setInvoices(invoiceRows);
     setInvoiceLines(lineRows);
     setExpenses(expenseRows);
+    setExpenseCorrections(correctionRows);
+    setInvoiceCorrections(invoiceCorrectionRows);
     if (p.data.role !== "customer") {
       const all = await db
         .from("profiles")
@@ -502,7 +573,10 @@ export default function App() {
             <button
               className={tab === key ? "active" : ""}
               aria-current={tab === key ? "page" : undefined}
-              onClick={() => setTab(key)}
+              onClick={() => {
+                clearReportFocus();
+                setTab(key);
+              }}
               key={key}
             >
               {label}
@@ -599,7 +673,10 @@ export default function App() {
                 対象の物件
                 <select
                   value={selected}
-                  onChange={(e) => setSelected(e.target.value)}
+                  onChange={(e) => {
+                    clearReportFocus();
+                    setSelected(e.target.value);
+                  }}
                 >
                   <option value="" disabled>
                     物件を選択してください
@@ -624,6 +701,10 @@ export default function App() {
                 messages={messages}
                 invoices={invoices}
                 invoiceLines={invoiceLines}
+                expenseCorrections={expenseCorrections}
+                invoiceCorrections={invoiceCorrections}
+                focusedReportId={focusedReportId}
+                onOpenReport={openReport}
                 expenses={expenses}
                 properties={properties}
                 selected={selected}
@@ -698,6 +779,7 @@ export default function App() {
                 messagesReady={messagesReady}
                 onStatus={changeStatus}
                 onOpen={(propertyId) => {
+                  clearReportFocus();
                   setSelected(propertyId);
                   setTab("timeline");
                 }}
@@ -871,7 +953,7 @@ export default function App() {
                 reports={reports}
                 properties={properties}
                 busy={busy}
-                onSave={async (expense, item, amount) =>
+                onSave={async (expense, item, amount, reason) =>
                   action(async () => {
                     if (
                       !item ||
@@ -881,17 +963,21 @@ export default function App() {
                       amount > 999999999
                     )
                       throw new Error("項目と金額を確認してください。");
-                    const result = await db!
-                      .from("report_expenses")
-                      .update({ item, amount_yen: amount })
-                      .eq("id", expense.id)
-                      .is("billed_at", null)
-                      .select("id");
-                    if (result.error) throw result.error;
-                    if (!result.data.length)
+                    if (!reason || reason.length > 2000)
                       throw new Error(
-                        "請求情報作成済みか、明細が更新されています。一覧を更新してください。",
+                        "訂正理由を1〜2000文字で入力してください。",
                       );
+                    const result = await db!.rpc("correct_report_expense", {
+                      p_data: {
+                        id: expense.id,
+                        item,
+                        amount_yen: amount,
+                        reason,
+                        original_item: expense.item,
+                        original_amount_yen: expense.amount_yen,
+                      },
+                    });
+                    if (result.error) throw result.error;
                   })
                 }
               />
@@ -903,6 +989,7 @@ export default function App() {
                 contracts={contracts}
                 invoices={invoices}
                 lines={invoiceLines}
+                invoiceCorrections={invoiceCorrections}
                 expenses={expenses}
                 reports={reports}
                 customerId={billingCustomer}

@@ -8,6 +8,7 @@ export type Expense = {
   item: string;
   amount_yen: number;
   billed_at: string | null;
+  created_at?: string;
 };
 export function ExpenseInputs() {
   const [rows, setRows] = useState<number[]>([]);
@@ -16,7 +17,7 @@ export function ExpenseInputs() {
     <fieldset>
       <legend>実費明細（任意）</legend>
       <p className="muted">
-        実際に発生した金額を円単位で入力してください。請求情報を作成するまでは管理者が修正できます。
+        実際に発生した金額を円単位で入力してください。登録後は管理者が理由を付けて訂正できます。
       </p>
       {rows.map((id) => (
         <div className="panel" key={id}>
@@ -77,7 +78,12 @@ export default function ExpenseManagement({
   reports: Report[];
   properties: Property[];
   busy: boolean;
-  onSave: (expense: Expense, item: string, amount: number) => Promise<boolean>;
+  onSave: (
+    expense: Expense,
+    item: string,
+    amount: number,
+    reason: string,
+  ) => Promise<boolean>;
 }) {
   const [selected, setSelected] = useState<Expense | null>(null);
   const [search, setSearch] = useState("");
@@ -109,6 +115,7 @@ export default function ExpenseManagement({
         selected,
         String(data.get("item")).trim(),
         Number(data.get("amount")),
+        String(data.get("reason")).trim(),
       )
     )
       setSelected(null);
@@ -118,7 +125,7 @@ export default function ExpenseManagement({
       <h2>作業報告の実費一覧</h2>
       <BillingNotice />
       <p className="muted">
-        請求情報の作成前に、項目と金額を確認・修正します。実費は顧客の作業報告にも目安として表示されます。
+        請求情報の作成・公開後も、理由を付けて項目と金額を訂正できます。有効な請求情報にも反映し、変更前後の履歴を残します。実費は顧客の作業報告にも目安として表示されます。
       </p>
       <label>
         実費を検索
@@ -152,17 +159,16 @@ export default function ExpenseManagement({
                 <td>{expense.item}</td>
                 <td>{expense.amount_yen.toLocaleString("ja-JP")}</td>
                 <td>
-                  {expense.billed_at ? (
-                    "請求情報作成済み"
-                  ) : (
-                    <button
-                      className="quiet"
-                      disabled={busy}
-                      onClick={() => setSelected(expense)}
-                    >
-                      未請求・修正
-                    </button>
-                  )}
+                  <small>
+                    {expense.billed_at ? "請求情報作成済み" : "未請求"}
+                  </small>
+                  <button
+                    className="quiet"
+                    disabled={busy}
+                    onClick={() => setSelected(expense)}
+                  >
+                    実費を訂正
+                  </button>
                 </td>
               </tr>
             ))}
@@ -172,7 +178,10 @@ export default function ExpenseManagement({
       {!rows.length && <p>該当する実費はありません。</p>}
       {selected && (
         <form className="panel user-editor" key={selected.id} onSubmit={submit}>
-          <h3>実費明細を修正</h3>
+          <h3>実費明細を訂正</h3>
+          <p className="muted">
+            理由は顧客にも表示されます。関連する下書き・公開済み請求情報も更新します。ローカルアプリの正式な請求書は変更しません。
+          </p>
           <fieldset disabled={busy}>
             <label>
               項目名
@@ -195,8 +204,18 @@ export default function ExpenseManagement({
                 required
               />
             </label>
+            <label>
+              訂正理由
+              <textarea
+                name="reason"
+                rows={3}
+                maxLength={2000}
+                required
+                placeholder="電話で金額を調整したため、など"
+              />
+            </label>
             <div className="user-actions">
-              <button>変更を保存</button>
+              <button>訂正を保存</button>
               <button
                 type="button"
                 className="quiet"

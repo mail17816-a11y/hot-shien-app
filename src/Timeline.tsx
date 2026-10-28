@@ -3,6 +3,11 @@ import { buildTimeline } from "./feed";
 import { InvoiceDetails, yen, type Invoice, type InvoiceLine } from "./Billing";
 import type { Expense } from "./Expenses";
 import BillingNotice from "./BillingNotice";
+import ExpenseCorrectionHistory, {
+  type ExpenseCorrection,
+  type InvoiceLineCorrection,
+  correctionDate,
+} from "./ExpenseCorrectionHistory";
 
 export type Profile = {
   id: string;
@@ -39,6 +44,7 @@ export type WorkRequest = {
   created_at: string;
 };
 export type Message = {
+  report_id?: string;
   id: string;
   property_id: string;
   author_id: string;
@@ -76,6 +82,10 @@ export default function Timeline({
   invoices = [],
   invoiceLines = [],
   expenses = [],
+  expenseCorrections = [],
+  invoiceCorrections = [],
+  focusedReportId = "",
+  onOpenReport,
 }: {
   reports: Report[];
   requests: WorkRequest[];
@@ -90,6 +100,10 @@ export default function Timeline({
   invoices?: Invoice[];
   invoiceLines?: InvoiceLine[];
   expenses?: Expense[];
+  expenseCorrections?: ExpenseCorrection[];
+  invoiceCorrections?: InvoiceLineCorrection[];
+  focusedReportId?: string;
+  onOpenReport?: (id: string) => void;
 }) {
   const [visibleTypes, setVisibleTypes] = useState({
     report: true,
@@ -104,7 +118,24 @@ export default function Timeline({
     expensesByReport.set(expense.report_id, rows);
   }
   const entries = [
-    ...buildTimeline(reports, requests, messages, selected),
+    ...buildTimeline(
+      reports,
+      requests,
+      [
+        ...messages,
+        ...expenseCorrections.map((correction) => ({
+          id: `correction-${correction.id}`,
+          property_id: correction.property_id,
+          author_id: correction.actor_id,
+          author_role: "admin" as const,
+          kind: "報告の訂正",
+          body: "報告内容を訂正しました。",
+          created_at: correction.created_at,
+          report_id: correction.report_id,
+        })),
+      ],
+      selected,
+    ),
     ...invoices
       .filter(
         (invoice) =>
@@ -139,8 +170,20 @@ export default function Timeline({
     !messagesReady && profile.role === "customer" ? "作業依頼" : postKind;
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
-  }, [selected, entries.length]);
+    if (!focusedReportId) bottom.current?.scrollIntoView({ block: "end" });
+  }, [selected, entries.length, focusedReportId]);
+  useEffect(() => {
+    if (!focusedReportId) return;
+    setVisibleTypes((previous) =>
+      previous.report ? previous : { ...previous, report: true },
+    );
+    const frame = requestAnimationFrame(() => {
+      document
+        .getElementById(`report-${focusedReportId}`)
+        ?.scrollIntoView({ block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusedReportId, selected]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -225,6 +268,7 @@ export default function Timeline({
             <article
               className={`chat-entry ${own ? "own" : ""}`}
               key={`${entry.type}:${r.id}`}
+              id={entry.type === "report" ? `report-${r.id}` : undefined}
             >
               <div className="chat-sender">
                 {own
@@ -252,9 +296,36 @@ export default function Timeline({
                   <InvoiceDetails
                     invoice={entry.invoice}
                     lines={invoiceLines}
+                    corrections={invoiceCorrections}
                   />
                 ) : (
                   <p className="body">{r.body}</p>
+                )}
+                {entry.type === "message" && entry.data.report_id && (
+                  <p>
+                    対象：
+                    <a
+                      href={`#report-${entry.data.report_id}`}
+                      onClick={(event) => {
+                        const id = entry.data.report_id!;
+                        setVisibleTypes((previous) => ({
+                          ...previous,
+                          report: true,
+                        }));
+                        if (onOpenReport) {
+                          event.preventDefault();
+                          onOpenReport(id);
+                        }
+                        requestAnimationFrame(() =>
+                          document
+                            .getElementById(`report-${id}`)
+                            ?.scrollIntoView({ block: "start" }),
+                        );
+                      }}
+                    >
+                      該当の作業報告を開く
+                    </a>
+                  </p>
                 )}
                 {reportExpenses.length > 0 && (
                   <section
@@ -293,6 +364,16 @@ export default function Timeline({
                       </a>
                     ))}
                   </div>
+                )}
+                {entry.type === "report" && (
+                  <>
+                    <small>作成日時：{correctionDate(r.created_at)}</small>
+                    <ExpenseCorrectionHistory
+                      corrections={expenseCorrections.filter(
+                        (correction) => correction.report_id === r.id,
+                      )}
+                    />
+                  </>
                 )}
                 {entry.type === "request" &&
                   (profile.role === "customer" ? (
