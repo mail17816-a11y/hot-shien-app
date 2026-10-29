@@ -889,6 +889,9 @@ fieldset {
   object-fit: cover;
   border-radius: 4px;
 }
+.report-editor {
+  margin-top: 24px;
+}
 .report-list-row {
   display: flex;
   align-items: center;
