@@ -3,9 +3,24 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase as db } from "./supabase";
 import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
 import ScreenNavigation from "./ScreenNavigation";
+import ReportEditor from "./ReportEditor";
+import PropertyInspectionSettings from "./PropertyInspectionSettings";
+import type {
+  InspectionSubject,
+  InspectionItem,
+  InspectionProfile,
+  InspectionTarget,
+  InspectionResult,
+  ReportRevision,
+  ReportSave,
+} from "./inspections";
+import type {
+  ExpenseCorrection,
+  InvoiceLineCorrection,
+} from "./ExpenseCorrectionHistory";
 import UserManagement, { type UserOperation } from "./UserManagement";
 import RequestInbox from "./RequestInbox";
-import ExpenseManagement, { ExpenseInputs, type Expense } from "./Expenses";
+import ExpenseManagement, { type Expense } from "./Expenses";
 import Billing, {
   type Contract,
   type Invoice,
@@ -19,21 +34,19 @@ import Timeline, {
   type Message,
   type Post,
 } from "./Timeline";
-const kinds = ["定期巡回", "除草・清掃", "郵便物対応"];
 const roles = { admin: "管理者", worker: "作業者", customer: "顧客" };
-async function allBillingRows<T>(
+async function allRows<T>(
   table: string,
   order = "id",
   ascending = true,
+  tieBreakers: string[] = ["id"],
 ) {
   const rows: T[] = [];
   for (let offset = 0; ; offset += 500) {
-    const result = await db!
-      .from(table)
-      .select("*")
-      .order(order, { ascending })
-      .order("id")
-      .range(offset, offset + 499);
+    let query = db!.from(table).select("*").order(order, { ascending });
+    for (const field of tieBreakers)
+      if (field !== order) query = query.order(field);
+    const result = await query.range(offset, offset + 499);
     if (result.error) throw result.error;
     rows.push(...(result.data as T[]));
     if (result.data.length < 500) return rows;
@@ -47,6 +60,7 @@ const errorText = (e: unknown) =>
       : "処理に失敗しました。再度お試しください。";
 export default function App() {
   const generation = useRef(0);
+  const renderGeneration = generation.current;
   const [session, setSession] = useState<Session | null>(null),
     [ready, setReady] = useState(false),
     [profile, setProfile] = useState<Profile | null>(null);
@@ -57,6 +71,31 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]),
     [messagesReady, setMessagesReady] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expenseCorrections, setExpenseCorrections] = useState<
+    ExpenseCorrection[]
+  >([]);
+  const [invoiceCorrections, setInvoiceCorrections] = useState<
+    InvoiceLineCorrection[]
+  >([]);
+  const [focusedReportId, setFocusedReportId] = useState("");
+  const lastReportHash = useRef("");
+  const [inspectionSubjects, setInspectionSubjects] = useState<
+    InspectionSubject[]
+  >([]);
+  const [inspectionItems, setInspectionItems] = useState<InspectionItem[]>([]);
+  const [inspectionProfiles, setInspectionProfiles] = useState<
+    InspectionProfile[]
+  >([]);
+  const [inspectionTargets, setInspectionTargets] = useState<
+    InspectionTarget[]
+  >([]);
+  const [inspectionResults, setInspectionResults] = useState<
+    InspectionResult[]
+  >([]);
+  const [reportRevisions, setReportRevisions] = useState<ReportRevision[]>([]);
+  const [editingReportId, setEditingReportId] = useState("");
+  const [reportEditorOpen, setReportEditorOpen] = useState(true);
+  const [configuringProperty, setConfiguringProperty] = useState("");
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
@@ -83,6 +122,9 @@ export default function App() {
     });
     const { data } = db.auth.onAuthStateChange((_event, s) => {
       generation.current++;
+      setBusy(false);
+      setError("");
+      setNotice("");
       setSession(s);
       setProfile(null);
       setProperties([]);
@@ -91,6 +133,19 @@ export default function App() {
       setPeople([]);
       setMessages([]);
       setExpenses([]);
+      setInspectionSubjects([]);
+      setInspectionItems([]);
+      setInspectionProfiles([]);
+      setInspectionTargets([]);
+      setInspectionResults([]);
+      setReportRevisions([]);
+      setEditingReportId("");
+      setReportEditorOpen(true);
+      setConfiguringProperty("");
+      setExpenseCorrections([]);
+      setInvoiceCorrections([]);
+      setFocusedReportId("");
+      lastReportHash.current = "";
       setContracts([]);
       setInvoices([]);
       setInvoiceLines([]);
@@ -104,8 +159,45 @@ export default function App() {
       data.subscription.unsubscribe();
     };
   }, []);
+  function clearReportFocus() {
+    setFocusedReportId("");
+    if (window.location.hash.startsWith("#report-")) {
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+    lastReportHash.current = "";
+  }
+  function openReport(id: string) {
+    const report = reports.find((row) => row.id === id);
+    if (!report) return;
+    setTab("timeline");
+    setSelected(report.property_id);
+    setFocusedReportId(id);
+    window.history.replaceState(null, "", `#report-${id}`);
+    lastReportHash.current = window.location.hash;
+  }
+  useEffect(() => {
+    function followReportLink() {
+      const hash = window.location.hash;
+      if (!hash.startsWith("#report-") || hash === lastReportHash.current)
+        return;
+      const id = hash.slice(8);
+      const report = reports.find((row) => row.id === id);
+      if (!report) return;
+      setTab("timeline");
+      setSelected(report.property_id);
+      setFocusedReportId(id);
+      lastReportHash.current = hash;
+    }
+    followReportLink();
+    window.addEventListener("hashchange", followReportLink);
+    return () => window.removeEventListener("hashchange", followReportLink);
+  }, [reports]);
   async function load() {
-    if (!db || !session) return;
+    if (!db || !session || renderGeneration !== generation.current) return;
     const version = generation.current;
     const p = await db
       .from("profiles")
@@ -127,13 +219,9 @@ export default function App() {
         "このアカウントは停止されています。管理者にお問い合わせください。",
       );
     setProfile(p.data);
-    const [a, b, c, m] = await Promise.all([
+    const [a, reportRows, c, m] = await Promise.all([
       db.from("properties").select("*").order("property_number"),
-      db
-        .from("reports")
-        .select("*")
-        .order("performed_on", { ascending: false })
-        .order("created_at", { ascending: false }),
+      allRows<Report>("reports", "created_at", false),
       db
         .from("work_requests")
         .select("*")
@@ -145,7 +233,6 @@ export default function App() {
     ]);
     if (version !== generation.current) return;
     if (a.error) throw a.error;
-    if (b.error) throw b.error;
     if (c.error) throw c.error;
     setProperties(a.data);
     setRequests(c.data);
@@ -158,7 +245,7 @@ export default function App() {
       setMessagesReady(true);
     }
     const hydrated = await Promise.all(
-      b.data.map(async (r: Report) => {
+      reportRows.map(async (r: Report) => {
         if (!r.photo_paths.length) return { ...r, urls: [] };
         const result = await db!.storage
           .from("report-photos")
@@ -166,26 +253,88 @@ export default function App() {
         if (result.error) throw result.error;
         return {
           ...r,
-          urls: result.data
-            .map((x) => x.signedUrl)
-            .filter((url): url is string => Boolean(url)),
+          urls: result.data.map((x) => x.signedUrl || ""),
         };
       }),
     );
     if (version !== generation.current) return;
     setReports(hydrated);
-    const [contractRows, invoiceRows, lineRows, expenseRows] =
-      await Promise.all([
-        allBillingRows<Contract>("customer_contracts", "created_at"),
-        allBillingRows<Invoice>("billing_invoices", "period", false),
-        allBillingRows<InvoiceLine>("billing_lines", "category", false),
-        allBillingRows<Expense>("report_expenses", "created_at", false),
-      ]);
+    const [
+      contractRows,
+      invoiceRows,
+      lineRows,
+      expenseRows,
+      correctionRows,
+      invoiceCorrectionRows,
+      subjects,
+      items,
+      profiles,
+      targets,
+      results,
+      revisions,
+    ] = await Promise.all([
+      allRows<Contract>("customer_contracts", "created_at"),
+      allRows<Invoice>("billing_invoices", "period", false),
+      allRows<InvoiceLine>("billing_lines", "category", false),
+      allRows<Expense>("report_expenses", "created_at", false),
+      allRows<ExpenseCorrection>("expense_corrections", "created_at", false),
+      allRows<InvoiceLineCorrection>(
+        "invoice_line_corrections",
+        "created_at",
+        false,
+      ),
+      allRows<InspectionSubject>("inspection_subjects", "sort_order"),
+      allRows<InspectionItem>("inspection_items", "sort_order"),
+      allRows<InspectionProfile>(
+        "property_inspection_profiles",
+        "property_id",
+        true,
+        [],
+      ),
+      allRows<InspectionTarget>(
+        "property_inspection_targets",
+        "subject_id",
+        true,
+        ["property_id"],
+      ),
+      allRows<InspectionResult>("report_inspection_results", "item_id", true, [
+        "report_id",
+      ]),
+      allRows<ReportRevision>("report_revisions", "created_at", false),
+    ]);
     if (version !== generation.current) return;
     setContracts(contractRows);
     setInvoices(invoiceRows);
     setInvoiceLines(lineRows);
     setExpenses(expenseRows);
+    setExpenseCorrections(correctionRows);
+    setInvoiceCorrections(invoiceCorrectionRows);
+    setInspectionSubjects(subjects);
+    setInspectionItems(items);
+    setInspectionProfiles(profiles);
+    setInspectionTargets(targets);
+    setInspectionResults(results);
+    const historicalPaths = [
+      ...new Set(
+        revisions.flatMap((row) => [
+          ...((row.before_values.photo_paths as string[]) || []),
+          ...((row.after_values.photo_paths as string[]) || []),
+        ]),
+      ),
+    ];
+    const historicalUrls: Record<string, string> = {};
+    for (let offset = 0; offset < historicalPaths.length; offset += 100) {
+      const signed = await db.storage
+        .from("report-photos")
+        .createSignedUrls(historicalPaths.slice(offset, offset + 100), 3600);
+      for (const entry of signed.data || [])
+        if (entry.path && entry.signedUrl)
+          historicalUrls[entry.path] = entry.signedUrl;
+    }
+    if (version !== generation.current) return;
+    setReportRevisions(
+      revisions.map((row) => ({ ...row, photo_urls: historicalUrls })),
+    );
     if (p.data.role !== "customer") {
       const all = await db
         .from("profiles")
@@ -207,19 +356,22 @@ export default function App() {
     };
   }, [session]);
   async function action(task: () => Promise<void>) {
+    const operationGeneration = generation.current;
     setBusy(true);
     setError("");
     setNotice("");
     try {
       await task();
+      if (operationGeneration !== generation.current) return false;
       await load();
+      if (operationGeneration !== generation.current) return false;
       setNotice("保存しました。");
       return true;
     } catch (e) {
-      setError(errorText(e));
+      if (operationGeneration === generation.current) setError(errorText(e));
       return false;
     } finally {
-      setBusy(false);
+      if (operationGeneration === generation.current) setBusy(false);
     }
   }
   async function saveUser(operation: UserOperation) {
@@ -283,71 +435,110 @@ export default function App() {
       if (r.error) throw r.error;
     });
   }
-  async function saveReport(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget,
-      f = new FormData(form);
-    await action(async () => {
-      const id = crypto.randomUUID();
-      const items = f.getAll("expense_item"),
-        amounts = f.getAll("expense_amount");
-      const costs = items.map((item, index) => ({
-        item: String(item).trim(),
-        amount_yen: Number(amounts[index]),
-      }));
+  function editReport(report: Report) {
+    clearReportFocus();
+    setSelected(report.property_id);
+    setEditingReportId(report.id);
+    setReportEditorOpen(true);
+    setTab("report");
+  }
+  async function saveStructuredReport(
+    data: ReportSave,
+    files: File[],
+    expenses: { item: string; amount_yen: number }[],
+  ) {
+    return action(async () => {
+      const operationGeneration = generation.current;
+      function requireSameSession() {
+        if (operationGeneration !== generation.current)
+          throw new Error("ログイン状態が変わったため操作を中断しました。");
+      }
+      if (data.photo_paths.length + files.length > 10)
+        throw new Error("写真は合計10枚までです。");
       if (
-        costs.some(
-          (cost) =>
-            !cost.item ||
-            cost.item.length > 200 ||
-            !Number.isInteger(cost.amount_yen) ||
-            cost.amount_yen < 1 ||
-            cost.amount_yen > 999999999,
+        files.some(
+          (file) =>
+            file.size > 10 * 1024 * 1024 ||
+            !["image/jpeg", "image/png", "image/webp"].includes(file.type),
         )
       )
-        throw new Error("実費の項目と金額を確認してください。");
-      const r = await db!.rpc("create_report_with_expenses", {
-        p_id: id,
-        p_property_id: selected,
-        p_kind: f.get("kind"),
-        p_body: f.get("body"),
-        p_performed_on: f.get("date"),
-        p_expenses: costs,
-      });
-      if (r.error) throw r.error;
-      const files = f
-        .getAll("photos")
-        .filter((x): x is File => x instanceof File && x.size > 0);
-      const paths: string[] = [];
+        throw new Error("写真は10MB以下のJPEG・PNG・WebPを選んでください。");
+      const creating = !data.id;
+      let id = data.id || crypto.randomUUID(),
+        revision = data.revision;
+      const uploaded: string[] = [];
+      if (creating) {
+        const initial = await db!.rpc("save_patrol_report", {
+          p_data: { ...data, id, publication_status: "draft", photo_paths: [] },
+          p_expenses: expenses,
+        });
+        if (initial.error) throw initial.error;
+        requireSameSession();
+        revision = initial.data.revision;
+        setReports((old) => [
+          ...old.filter((row) => row.id !== id),
+          initial.data as Report,
+        ]);
+        setInspectionResults((old) => [
+          ...old.filter((row) => row.report_id !== id),
+          ...data.results.map((row) => ({ ...row, report_id: id })),
+        ]);
+        setEditingReportId(id);
+        setReportEditorOpen(true);
+      }
       try {
-        if (files.length > 10) throw new Error("写真は10枚まで登録できます。");
         for (const file of files) {
-          if (
-            file.size > 10 * 1024 * 1024 ||
-            !["image/jpeg", "image/png", "image/webp"].includes(file.type)
-          )
-            throw new Error(
-              "写真は10MB以下のJPEG・PNG・WebPを選んでください。",
-            );
+          requireSameSession();
           const path = `${id}/${crypto.randomUUID()}`;
-          const up = await db!.storage
+          const result = await db!.storage
             .from("report-photos")
             .upload(path, file, { contentType: file.type });
-          if (up.error) throw up.error;
-          paths.push(path);
+          if (result.error) throw result.error;
+          uploaded.push(path);
         }
-        const update = await db!
-          .from("reports")
-          .update({ photo_paths: paths })
-          .eq("id", id);
-        if (update.error) throw update.error;
-      } catch (e) {
-        if (paths.length) await db!.storage.from("report-photos").remove(paths);
-        await db!.from("reports").delete().eq("id", id);
-        throw e;
+        requireSameSession();
+        const saved = await db!.rpc("save_patrol_report", {
+          p_data: {
+            ...data,
+            id,
+            revision,
+            photo_paths: [...data.photo_paths, ...uploaded],
+            reason: creating
+              ? data.publication_status === "published"
+                ? "初回公開"
+                : "写真を追加"
+              : data.reason,
+          },
+          p_expenses: [],
+        });
+        if (saved.error) throw saved.error;
+        requireSameSession();
+        setReports((old) => [
+          ...old.filter((row) => row.id !== id),
+          saved.data as Report,
+        ]);
+        setInspectionResults((old) => [
+          ...old.filter((row) => row.report_id !== id),
+          ...data.results.map((row) => ({ ...row, report_id: id })),
+        ]);
+      } catch (error) {
+        if (uploaded.length)
+          await db!.storage.from("report-photos").remove(uploaded);
+        await load().catch(() => {});
+        throw error;
       }
-      form.reset();
+      await load();
+      requireSameSession();
+      setEditingReportId("");
+      setReportEditorOpen(false);
       setReportFormVersion((old) => old + 1);
+      if (data.publication_status === "published") {
+        setTab("timeline");
+        setSelected(data.property_id);
+        setFocusedReportId(id);
+        window.history.replaceState(null, "", `#report-${id}`);
+        lastReportHash.current = window.location.hash;
+      }
     });
   }
   async function postMessage(post: Post) {
@@ -502,7 +693,10 @@ export default function App() {
             <button
               className={tab === key ? "active" : ""}
               aria-current={tab === key ? "page" : undefined}
-              onClick={() => setTab(key)}
+              onClick={() => {
+                clearReportFocus();
+                setTab(key);
+              }}
               key={key}
             >
               {label}
@@ -599,7 +793,15 @@ export default function App() {
                 対象の物件
                 <select
                   value={selected}
-                  onChange={(e) => setSelected(e.target.value)}
+                  onChange={(e) => {
+                    clearReportFocus();
+                    setSelected(e.target.value);
+                    if (tab === "report") {
+                      setEditingReportId("");
+                      setReportEditorOpen(true);
+                      setReportFormVersion((old) => old + 1);
+                    }
+                  }}
                 >
                   <option value="" disabled>
                     物件を選択してください
@@ -624,6 +826,15 @@ export default function App() {
                 messages={messages}
                 invoices={invoices}
                 invoiceLines={invoiceLines}
+                expenseCorrections={expenseCorrections}
+                invoiceCorrections={invoiceCorrections}
+                focusedReportId={focusedReportId}
+                onOpenReport={openReport}
+                onEditReport={editReport}
+                inspectionSubjects={inspectionSubjects}
+                inspectionItems={inspectionItems}
+                inspectionResults={inspectionResults}
+                reportRevisions={reportRevisions}
                 expenses={expenses}
                 properties={properties}
                 selected={selected}
@@ -635,58 +846,76 @@ export default function App() {
               />
             )}
             {tab === "report" && profile.role !== "customer" && (
-              <section className="panel">
-                <h2>新しい作業記録</h2>
-                <form onSubmit={saveReport} key={reportFormVersion}>
-                  <p className="muted">
-                    上の一覧から報告する物件を選択してください。
-                  </p>
-                  <div className="row">
-                    <label>
-                      作業種別
-                      <select name="kind">
-                        {kinds.map((k) => (
-                          <option key={k}>{k}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      作業日
-                      <input
-                        type="date"
-                        name="date"
-                        defaultValue={new Intl.DateTimeFormat("sv-SE", {
-                          timeZone: "Asia/Tokyo",
-                        }).format(new Date())}
-                        required
-                      />
-                    </label>
-                  </div>
-                  <label>
-                    報告内容
-                    <textarea
-                      name="body"
-                      rows={5}
-                      maxLength={5000}
-                      required
-                      placeholder="物件の様子、実施した作業、気になる点など"
-                    />
-                  </label>
-                  <label>
-                    写真（10枚まで・1枚10MB以下）
-                    <input
-                      type="file"
-                      name="photos"
-                      accept="image/jpeg,image/png,image/webp"
-                      multiple
-                    />
-                  </label>
-                  <ExpenseInputs />
-                  <button disabled={busy || !selected}>
-                    {busy ? "保存中…" : "報告を登録"}
+              <>
+                <div className="user-actions">
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingReportId("");
+                      setReportFormVersion((old) => old + 1);
+                      setReportEditorOpen(true);
+                    }}
+                  >
+                    新しい報告を作成
                   </button>
-                </form>
-              </section>
+                </div>
+                {reportEditorOpen && (
+                  <ReportEditor
+                    key={`${editingReportId || "new"}:${selected}:${reports.find((r) => r.id === editingReportId)?.revision || 0}:${inspectionProfiles.find((p) => p.property_id === selected)?.updated_at || ""}:${reportFormVersion}`}
+                    report={reports.find((r) => r.id === editingReportId)}
+                    property={properties.find((p) => p.id === selected)}
+                    subjects={inspectionSubjects}
+                    items={inspectionItems}
+                    profile={inspectionProfiles.find(
+                      (p) => p.property_id === selected,
+                    )}
+                    targets={inspectionTargets.filter(
+                      (t) => t.property_id === selected,
+                    )}
+                    results={inspectionResults.filter(
+                      (r) => r.report_id === editingReportId,
+                    )}
+                    busy={busy}
+                    onSave={saveStructuredReport}
+                    onClose={() => {
+                      setReportEditorOpen(false);
+                      setEditingReportId("");
+                    }}
+                  />
+                )}
+                <section className="panel">
+                  <h2>報告一覧・下書き</h2>
+                  {reports
+                    .filter(
+                      (r) =>
+                        (!selected || r.property_id === selected) &&
+                        (profile.role === "admin" ||
+                          r.author_id === profile.id),
+                    )
+                    .map((report) => (
+                      <article className="report-list-row" key={report.id}>
+                        <span>
+                          {report.performed_on} ／{" "}
+                          {
+                            properties.find((p) => p.id === report.property_id)
+                              ?.property_number
+                          }{" "}
+                          ／ {report.kind} ／{" "}
+                          {report.publication_status === "draft"
+                            ? "下書き"
+                            : "公開済み"}
+                        </span>
+                        <button
+                          className="quiet"
+                          disabled={busy}
+                          onClick={() => editReport(report)}
+                        >
+                          報告を編集
+                        </button>
+                      </article>
+                    ))}
+                </section>
+              </>
             )}
             {tab === "requests" && profile.role !== "customer" && (
               <RequestInbox
@@ -698,6 +927,7 @@ export default function App() {
                 messagesReady={messagesReady}
                 onStatus={changeStatus}
                 onOpen={(propertyId) => {
+                  clearReportFocus();
                   setSelected(propertyId);
                   setTab("timeline");
                 }}
@@ -840,6 +1070,7 @@ export default function App() {
                         <th scope="col">物件番号</th>
                         <th scope="col">顧客番号</th>
                         <th scope="col">ログインID</th>
+                        <th scope="col">設備・点検対象</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -848,11 +1079,49 @@ export default function App() {
                           <td>{property.property_number}</td>
                           <td>{owner?.customer_number || "—"}</td>
                           <td>{owner?.login_id || "—"}</td>
+                          <td>
+                            <button
+                              className="quiet"
+                              disabled={busy}
+                              onClick={() =>
+                                setConfiguringProperty(property.id)
+                              }
+                            >
+                              点検対象を設定
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                {configuringProperty && (
+                  <PropertyInspectionSettings
+                    key={`${configuringProperty}:${inspectionProfiles.find((p) => p.property_id === configuringProperty)?.updated_at || ""}`}
+                    propertyNumber={
+                      properties.find((p) => p.id === configuringProperty)
+                        ?.property_number || ""
+                    }
+                    subjects={inspectionSubjects}
+                    targets={inspectionTargets.filter(
+                      (t) => t.property_id === configuringProperty,
+                    )}
+                    busy={busy}
+                    onClose={() => setConfiguringProperty("")}
+                    onSave={(targets) =>
+                      action(async () => {
+                        const result = await db!.rpc(
+                          "save_inspection_targets",
+                          {
+                            p_property_id: configuringProperty,
+                            p_targets: targets,
+                          },
+                        );
+                        if (result.error) throw result.error;
+                      })
+                    }
+                  />
+                )}
                 <p role="status">
                   {propertyRows.length}件 / 全{properties.length}件
                 </p>
@@ -871,7 +1140,7 @@ export default function App() {
                 reports={reports}
                 properties={properties}
                 busy={busy}
-                onSave={async (expense, item, amount) =>
+                onSave={async (expense, item, amount, reason) =>
                   action(async () => {
                     if (
                       !item ||
@@ -881,17 +1150,21 @@ export default function App() {
                       amount > 999999999
                     )
                       throw new Error("項目と金額を確認してください。");
-                    const result = await db!
-                      .from("report_expenses")
-                      .update({ item, amount_yen: amount })
-                      .eq("id", expense.id)
-                      .is("billed_at", null)
-                      .select("id");
-                    if (result.error) throw result.error;
-                    if (!result.data.length)
+                    if (!reason || reason.length > 2000)
                       throw new Error(
-                        "請求情報作成済みか、明細が更新されています。一覧を更新してください。",
+                        "訂正理由を1〜2000文字で入力してください。",
                       );
+                    const result = await db!.rpc("correct_report_expense", {
+                      p_data: {
+                        id: expense.id,
+                        item,
+                        amount_yen: amount,
+                        reason,
+                        original_item: expense.item,
+                        original_amount_yen: expense.amount_yen,
+                      },
+                    });
+                    if (result.error) throw result.error;
                   })
                 }
               />
@@ -903,6 +1176,7 @@ export default function App() {
                 contracts={contracts}
                 invoices={invoices}
                 lines={invoiceLines}
+                invoiceCorrections={invoiceCorrections}
                 expenses={expenses}
                 reports={reports}
                 customerId={billingCustomer}

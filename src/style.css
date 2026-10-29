@@ -814,3 +814,90 @@ fieldset {
 .reception > .section-title > span {
   white-space: nowrap;
 }
+
+.correction-history {
+  margin-top: 16px;
+  border-top: 1px solid #dfe7de;
+  padding-top: 12px;
+  overflow-wrap: anywhere;
+}
+.correction-history summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.correction-history article {
+  padding: 12px 0;
+  border-bottom: 1px solid #edf1ec;
+}
+.correction-history p {
+  margin: 6px 0;
+}
+.chat-entry[id] {
+  scroll-margin-top: 16px;
+}
+
+.inspection-group,
+.inspection-setting-row {
+  border: 1px solid #dfe7de;
+  padding: 14px;
+  border-radius: 8px;
+  margin: 14px 0;
+}
+.inspection-group summary,
+.inspection-report summary,
+.revision-field summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+.inspection-check + .inspection-check {
+  border-top: 1px solid #edf1ec;
+  margin-top: 12px;
+}
+.inspection-result {
+  border-bottom: 1px solid #edf1ec;
+  padding: 8px 0;
+}
+.inspection-result dt {
+  font-weight: 600;
+  font-size: 13px;
+}
+.inspection-result dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.inspection-result p {
+  margin: 4px 0;
+}
+.inspection-report {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.revision-field {
+  margin: 10px 0;
+  padding: 8px;
+  border: 1px solid #dfe7de;
+  border-radius: 6px;
+}
+.revision-field > strong {
+  font-size: 12px;
+}
+.photo-thumbnail {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.report-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #dfe7de;
+  font-size: 13px;
+}
+.report-list-row button {
+  flex-shrink: 0;
+}

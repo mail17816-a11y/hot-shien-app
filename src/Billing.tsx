@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from "react";
 import BillingNotice from "./BillingNotice";
+import ExpenseCorrectionHistory, {
+  type InvoiceLineCorrection,
+} from "./ExpenseCorrectionHistory";
 import type { Profile, Property, Report } from "./Timeline";
 import type { Expense } from "./Expenses";
 
@@ -51,9 +54,11 @@ export const yen = (amount: number) => `${amount.toLocaleString("ja-JP")}円`;
 export function InvoiceDetails({
   invoice,
   lines,
+  corrections = [],
 }: {
   invoice: Invoice;
   lines: InvoiceLine[];
+  corrections?: InvoiceLineCorrection[];
 }) {
   const rows = lines.filter((line) => line.invoice_id === invoice.id);
   const fixed = rows
@@ -99,6 +104,9 @@ export function InvoiceDetails({
       <p>
         <strong>合計 {yen(fixed + extra)}</strong>
       </p>
+      <ExpenseCorrectionHistory
+        corrections={corrections.filter((row) => row.invoice_id === invoice.id)}
+      />
       <small>
         登録された合意済み金額の合計です。日割り・税額・季節割増の自動計算は行いません。
       </small>
@@ -213,6 +221,7 @@ export default function Billing({
   lines,
   expenses,
   reports,
+  invoiceCorrections = [],
   customerId,
   onCustomer,
   busy,
@@ -225,6 +234,7 @@ export default function Billing({
   lines: InvoiceLine[];
   expenses: Expense[];
   reports: Report[];
+  invoiceCorrections?: InvoiceLineCorrection[];
   customerId: string;
   onCustomer: (id: string) => void;
   busy: boolean;
@@ -266,6 +276,7 @@ export default function Billing({
     .filter(
       ({ expense, report }) =>
         report &&
+        report.publication_status !== "draft" &&
         ownProperties.some((property) => property.id === report.property_id) &&
         report.performed_on.slice(0, 7) <= period &&
         (!expense.billed_at || attached.has(expense.id)),
@@ -614,7 +625,7 @@ export default function Billing({
               {draft ? "下書きを再作成" : "請求情報の下書きを作成"}
             </button>
             <small>
-              下書きに取り込んだ実費は修正できなくなります。外す場合はチェックを外して下書きを再作成してください。契約・実費を修正した後も再作成が必要です。
+              実費は作成後・公開後も訂正でき、関連する請求情報へ反映されます。請求から実費を外す場合や契約を変更した場合は、下書きを再作成してください。
             </small>
           </section>
           <section>
@@ -631,7 +642,11 @@ export default function Billing({
                       ? "撤回済み・顧客には非表示"
                       : "公開済み"}
                 </span>
-                <InvoiceDetails invoice={invoice} lines={lines} />
+                <InvoiceDetails
+                  invoice={invoice}
+                  lines={lines}
+                  corrections={invoiceCorrections}
+                />
                 {invoice.status === "cancelled" && invoice.cancelled_at && (
                   <small>
                     撤回日時：
