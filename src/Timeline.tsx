@@ -139,6 +139,16 @@ export default function Timeline({
     request: true,
     message: true,
   });
+  const [collapsedTopics, setCollapsedTopics] = useState<Set<string>>(
+    new Set(),
+  );
+  function openReportTopic(id: string) {
+    setCollapsedTopics((previous) => {
+      const next = new Set(previous);
+      next.delete(`report:${id}`);
+      return next;
+    });
+  }
   const expensesByReport = new Map<string, Expense[]>();
   for (const expense of expenses) {
     const rows = expensesByReport.get(expense.report_id) || [];
@@ -221,6 +231,7 @@ export default function Timeline({
   }, [selected, entries.length, focusedReportId]);
   useEffect(() => {
     if (!focusedReportId) return;
+    openReportTopic(focusedReportId);
     setVisibleTypes((previous) =>
       previous.report ? previous : { ...previous, report: true },
     );
@@ -295,6 +306,7 @@ export default function Timeline({
       <div className="chat-tree" aria-label="物件の投稿一覧">
         {visibleEntries.map((entry) => {
           const r = entry.data;
+          const topicKey = `${entry.type}:${r.id}`;
           const reportExpenses =
             entry.type === "report" ? expensesByReport.get(r.id) || [] : [];
           const own =
@@ -322,12 +334,43 @@ export default function Timeline({
                   ? `あなた${entry.type === "message" ? ` · ${roles[profile.role]}` : ""}`
                   : sender}
               </div>
-              <div className="chat-bubble">
-                <div className="report-top">
-                  <span className="tag">
-                    {entry.type === "request" ? `作業依頼 · ${r.kind}` : r.kind}
+              <details
+                className="chat-bubble chat-topic"
+                open={!collapsedTopics.has(topicKey)}
+                onToggle={(event) => {
+                  const isOpen = event.currentTarget.open;
+                  setCollapsedTopics((previous) => {
+                    if (previous.has(topicKey) === !isOpen) return previous;
+                    const next = new Set(previous);
+                    if (isOpen) next.delete(topicKey);
+                    else next.add(topicKey);
+                    return next;
+                  });
+                }}
+              >
+                <summary className="chat-topic-heading">
+                  <span className="chat-topic-title">
+                    <span className="tag">
+                      {entry.type === "request"
+                        ? `作業依頼 · ${r.kind}`
+                        : r.kind}
+                    </span>
+                    {entry.type === "report" && (
+                      <small>作業日：{entry.data.performed_on}</small>
+                    )}
                   </span>
-                </div>
+                  <span className="chat-topic-toggle" aria-hidden="true">
+                    <span className="when-open">閉じる</span>
+                    <span className="when-closed">開く</span>
+                  </span>
+                  {collapsedTopics.has(topicKey) && (
+                    <span className="chat-topic-preview">
+                      {entry.type === "invoice"
+                        ? `${entry.invoice.period} の請求情報`
+                        : r.body.slice(0, 100) || "内容を表示"}
+                    </span>
+                  )}
+                </summary>
                 {!selected && (
                   <h3>
                     {properties.find((p) => p.id === r.property_id)
@@ -355,6 +398,7 @@ export default function Timeline({
                       href={`#report-${entry.data.report_id}`}
                       onClick={(event) => {
                         const id = entry.data.report_id!;
+                        openReportTopic(id);
                         setVisibleTypes((previous) => ({
                           ...previous,
                           report: true,
@@ -490,7 +534,7 @@ export default function Timeline({
                       </select>
                     </label>
                   ))}
-              </div>
+              </details>
               <time dateTime={r.created_at}>{dateTime(r.created_at)}</time>
             </article>
           );
