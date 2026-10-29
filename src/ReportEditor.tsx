@@ -245,45 +245,56 @@ export default function ReportEditor({
                       const row = checks.find((c) => c.item_id === item.id)!;
                       return (
                         <div className="inspection-check" key={item.id}>
-                          <label>
-                            {item.label}
-                            <select
-                              aria-label={`${subject.label}・${item.label}`}
-                              value={
-                                row.status === "checked"
-                                  ? row.result || "unconfirmed"
-                                  : row.status
-                              }
-                              onChange={(e) =>
-                                change(
-                                  item.id,
-                                  e.target.value === "unconfirmed" ||
-                                    e.target.value === "not_performed"
-                                    ? {
-                                        status: e.target.value,
-                                        result: null,
-                                        reason:
-                                          e.target.value === "not_performed"
-                                            ? row.reason
-                                            : "",
-                                      }
-                                    : {
-                                        status: "checked",
-                                        result: e.target.value,
-                                        reason: "",
-                                      },
-                                )
-                              }
-                            >
-                              <option value="unconfirmed">未確認</option>
-                              {resultOptions[item.result_kind].map(([v, l]) => (
-                                <option key={v} value={v}>
-                                  {l}
-                                </option>
+                          <fieldset
+                            className="inspection-options"
+                            aria-label={`${subject.label}・${item.label}`}
+                          >
+                            <legend>{item.label}</legend>
+                            <div className="inspection-option-list">
+                              {[
+                                ["unconfirmed", "未確認"],
+                                ...resultOptions[item.result_kind],
+                                ["not_performed", "今回未実施"],
+                              ].map(([value, label]) => (
+                                <label
+                                  className="inspection-option"
+                                  key={value}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`inspection-${item.id}`}
+                                    value={value}
+                                    checked={
+                                      (row.status === "checked"
+                                        ? row.result
+                                        : row.status) === value
+                                    }
+                                    onChange={() =>
+                                      change(
+                                        item.id,
+                                        value === "unconfirmed" ||
+                                          value === "not_performed"
+                                          ? {
+                                              status: value,
+                                              result: null,
+                                              reason:
+                                                value === "not_performed"
+                                                  ? row.reason
+                                                  : "",
+                                            }
+                                          : {
+                                              status: "checked",
+                                              result: value,
+                                              reason: "",
+                                            },
+                                      )
+                                    }
+                                  />
+                                  <span>{label}</span>
+                                </label>
                               ))}
-                              <option value="not_performed">今回未実施</option>
-                            </select>
-                          </label>
+                            </div>
+                          </fieldset>
                           {row.status === "not_performed" && (
                             <label>
                               この項目の未実施理由
