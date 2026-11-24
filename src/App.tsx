@@ -4,6 +4,8 @@ import { supabase as db } from "./supabase";
 import { loginEmail, normalizePropertyNumber, jwtIssuedAt } from "./login";
 import ScreenNavigation from "./ScreenNavigation";
 import ReportEditor from "./ReportEditor";
+import PropertyRegistration from "./PropertyRegistration";
+import type { RegistrationResult } from "./IdentifierField";
 import PropertyInspectionSettings from "./PropertyInspectionSettings";
 import type {
   InspectionSubject,
@@ -374,34 +376,83 @@ export default function App() {
       if (operationGeneration === generation.current) setBusy(false);
     }
   }
-  async function saveUser(operation: UserOperation) {
+  async function invokeAdminUsers(
+    operation:
+      | UserOperation
+      | { action: "suggest_identifier"; kind: "user" | "property" },
+  ) {
+    const version = generation.current;
+    const {
+      data: { session: current },
+      error: sessionError,
+    } = await db!.auth.getSession();
+    if (sessionError || !current || version !== generation.current)
+      throw new Error("ログインし直してください。");
+    const response = await db!.functions.invoke("admin-users", {
+      body: operation,
+      headers: { Authorization: `Bearer ${current.access_token}` },
+    });
+    if (version !== generation.current)
+      throw new Error("ログインし直してください。");
+    if (response.error) {
+      let detail =
+        "管理サーバーに接続できません。関数の公開と追加SQLの適用を確認してください。";
+      let code: string | undefined;
+      if (response.error.context instanceof Response) {
+        try {
+          const payload = await response.error.context.json();
+          detail = payload.error || detail;
+          code = payload.code;
+        } catch {}
+      }
+      throw Object.assign(new Error(detail), { code });
+    }
+    if (response.data?.error) throw new Error(response.data.error);
+    return response.data;
+  }
+  async function suggestIdentifier(kind: "user" | "property") {
+    const { identifier } =
+      (await invokeAdminUsers({
+        action: "suggest_identifier",
+        kind,
+      })) ?? {};
+    const format =
+      kind === "user" ? /^U[A-Z]{3}[0-9]{3}$/ : /^P[A-Z]{3}[0-9]{3}$/;
+    if (typeof identifier !== "string" || !format.test(identifier))
+      throw new Error("番号を提案できませんでした。再度お試しください。");
+    return identifier;
+  }
+  async function saveProperty(
+    customerId: string,
+    number: string,
+  ): Promise<RegistrationResult> {
+    const version = generation.current;
+    let result: RegistrationResult = false;
+    await action(async () => {
+      const { error } = await db!.from("properties").insert({
+        customer_id: customerId,
+        property_number: normalizePropertyNumber(number),
+      });
+      if (error?.code === "23505") {
+        result = "duplicate";
+        throw new Error("使用済みの物件番号です。");
+      }
+      if (error) throw error;
+      result = true;
+    });
+    return version === generation.current ? result : false;
+  }
+  async function saveUser(
+    operation: UserOperation,
+  ): Promise<RegistrationResult> {
+    const version = generation.current;
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const {
-        data: { session: current },
-        error: sessionError,
-      } = await db!.auth.getSession();
-      if (sessionError || !current)
-        throw new Error("ログインし直してください。");
-      const response = await db!.functions.invoke("admin-users", {
-        body: operation,
-        headers: { Authorization: `Bearer ${current.access_token}` },
-      });
-      if (response.error) {
-        let detail =
-          "管理サーバーに接続できません。関数の公開と追加SQLの適用を確認してください。";
-        if (response.error.context instanceof Response) {
-          try {
-            const payload = await response.error.context.json();
-            detail = payload.error || detail;
-          } catch {}
-        }
-        throw new Error(detail);
-      }
-      if (response.data?.error) throw new Error(response.data.error);
-      const updated = response.data?.user as Profile | undefined;
+      const data = await invokeAdminUsers(operation);
+      if (version !== generation.current) return false;
+      const updated = data?.user as Profile | undefined;
       if (updated)
         setPeople((old) =>
           (old.some((person) => person.id === updated.id)
@@ -418,10 +469,18 @@ export default function App() {
       );
       return true;
     } catch (error) {
+      if (version !== generation.current) return false;
+      if (
+        operation.action === "create" &&
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "duplicate_identifier"
+      )
+        return "duplicate";
       setError(errorText(error));
       return false;
     } finally {
-      setBusy(false);
+      if (version === generation.current) setBusy(false);
     }
   }
   async function login(e: FormEvent<HTMLFormElement>) {
@@ -1006,53 +1065,12 @@ export default function App() {
             {tab === "properties" && profile.role === "admin" && (
               <section className="panel">
                 <h2>物件一覧</h2>
-                <details className="panel property-registration">
-                  <summary>新しい物件を登録</summary>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const form = e.currentTarget,
-                        f = new FormData(form);
-                      action(async () => {
-                        const r = await db!.from("properties").insert({
-                          customer_id: f.get("customer"),
-                          property_number: normalizePropertyNumber(
-                            String(f.get("property_number")),
-                          ),
-                        });
-                        if (r.error) throw r.error;
-                        form.reset();
-                      });
-                    }}
-                  >
-                    <p className="muted">
-                      氏名・住所はローカル台帳で管理します。台帳に対応する物件番号を指定してください。
-                    </p>
-                    <label>
-                      物件番号
-                      <input name="property_number" maxLength={64} required />
-                    </label>
-                    <label>
-                      契約者の顧客番号
-                      <select name="customer" required>
-                        <option value="">顧客を選択</option>
-                        {people
-                          .filter(
-                            (p) =>
-                              p.role === "customer" &&
-                              p.active &&
-                              !p.deleted_at,
-                          )
-                          .map((p) => (
-                            <option value={p.id} key={p.id}>
-                              {p.customer_number || p.login_id}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <button disabled={busy}>物件を登録</button>
-                  </form>
-                </details>
+                <PropertyRegistration
+                  people={people}
+                  busy={busy}
+                  onSuggest={() => suggestIdentifier("property")}
+                  onSave={saveProperty}
+                />
                 <label>
                   物件を検索
                   <input
@@ -1200,6 +1218,7 @@ export default function App() {
                   currentUserId={profile.id}
                   busy={busy}
                   onSave={saveUser}
+                  onSuggest={() => suggestIdentifier("user")}
                   onContracts={(id) => {
                     setBillingCustomer(id);
                     setTab("billing");

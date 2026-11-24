@@ -11,12 +11,61 @@ const roles = ["customer", "worker", "admin"];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fields =
   "id,login_id,customer_number,role,active,deleted_at,auth_valid_after";
+const actionFields = new Map<string, string[]>([
+  ["list", ["action"]],
+  ["create", ["action", "login_id", "password", "role"]],
+  ["update", ["action", "user_id", "role", "active"]],
+  ["password", ["action", "user_id", "password"]],
+  ["delete", ["action", "user_id", "confirmation"]],
+  ["suggest_identifier", ["action", "kind"]],
+]);
 class HttpError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
+  readonly status: number;
+  readonly code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
+}
+function duplicateLoginId() {
+  return new HttpError(
+    409,
+    "使用済みのログインIDです。削除済みIDも再利用できません。",
+    "duplicate_identifier",
+  );
+}
+function randomCharacters(alphabet: string) {
+  const byte = new Uint8Array(1);
+  const limit = 256 - (256 % alphabet.length);
+  let result = "";
+  while (result.length < 3) {
+    crypto.getRandomValues(byte);
+    if (byte[0] < limit) result += alphabet[byte[0] % alphabet.length];
+  }
+  return result;
+}
+async function identifierExists(
+  admin: SupabaseClient,
+  kind: "user" | "property",
+  identifier: string,
+) {
+  const result = await (
+    kind === "user"
+      ? admin
+          .from("profiles")
+          .select("id")
+          .eq("login_id", identifier.toLowerCase())
+      : admin.from("properties").select("id").eq("property_number", identifier)
+  ).maybeSingle();
+  if (result.error)
+    throw new HttpError(
+      503,
+      kind === "user"
+        ? "ログインIDを確認できません。"
+        : "物件番号を確認できません。",
+    );
+  return result.data !== null;
 }
 function reply(status: number, data: unknown) {
   return new Response(JSON.stringify(data), { status, headers });
@@ -96,24 +145,28 @@ export function createHandler(
         throw new HttpError(400, "入力形式が不正です。");
       }
       const action = body.action;
-      if (
-        !["list", "create", "update", "password", "delete"].includes(
-          String(action),
-        )
-      )
-        throw new HttpError(400, "操作が不正です。");
-      const allowed =
-        action === "list"
-          ? ["action"]
-          : action === "create"
-            ? ["action", "login_id", "password", "role"]
-            : action === "update"
-              ? ["action", "user_id", "role", "active"]
-              : action === "password"
-                ? ["action", "user_id", "password"]
-                : ["action", "user_id", "confirmation"];
+      const allowed = typeof action === "string" && actionFields.get(action);
+      if (!allowed) throw new HttpError(400, "操作が不正です。");
       if (Object.keys(body).some((key) => !allowed.includes(key)))
         throw new HttpError(400, "許可されていない項目があります。");
+      if (action === "suggest_identifier") {
+        const kind = body.kind;
+        if (kind !== "user" && kind !== "property")
+          throw new HttpError(400, "番号の種類を指定してください。");
+        const prefix = kind === "user" ? "U" : "P";
+        for (let attempt = 0; attempt < 16; attempt++) {
+          const identifier =
+            prefix +
+            randomCharacters("ABCDEFGHIJKLMNOPQRSTUVWXYZ") +
+            randomCharacters("0123456789");
+          if (!(await identifierExists(admin, kind, identifier)))
+            return reply(200, { identifier });
+        }
+        throw new HttpError(
+          503,
+          "空いている番号を提案できませんでした。再度お試しください。",
+        );
+      }
       async function manage(
         targetId: string,
         options: Record<string, unknown> = {},
@@ -159,29 +212,25 @@ export function createHandler(
         if (!roles.includes(String(body.role)))
           throw new HttpError(400, "役割を選択してください。");
         const secret = password(body.password);
-        const existing = await admin
-          .from("profiles")
-          .select("id")
-          .eq("login_id", id)
-          .maybeSingle();
-        if (existing.error)
-          throw new HttpError(503, "ログインIDを確認できません。");
-        if (existing.data)
-          throw new HttpError(
-            409,
-            "使用済みのログインIDです。削除済みIDも再利用できません。",
-          );
+        if (await identifierExists(admin, "user", id)) throw duplicateLoginId();
         const created = await admin.auth.admin.createUser({
           email: `${id}@example.com`,
           password: secret,
           email_confirm: true,
           ban_duration: "876000h",
         });
-        if (created.error || !created.data.user)
+        if (created.error || !created.data.user) {
+          if (
+            created.error?.code === "email_exists" ||
+            created.error?.code === "user_already_exists" ||
+            (await identifierExists(admin, "user", id))
+          )
+            throw duplicateLoginId();
           throw new HttpError(
             409,
             "ユーザーを作成できません。ログインIDの重複やパスワード条件を確認してください。",
           );
+        }
         const targetId = created.data.user.id;
         try {
           const profile = await manage(targetId, {
@@ -254,7 +303,7 @@ export function createHandler(
       return reply(200, { user: updated });
     } catch (error) {
       if (error instanceof HttpError)
-        return reply(error.status, { error: error.message });
+        return reply(error.status, { error: error.message, code: error.code });
       console.error("admin-users: unexpected failure");
       return reply(500, { error: "管理操作に失敗しました。" });
     }

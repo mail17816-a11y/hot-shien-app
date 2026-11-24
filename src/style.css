@@ -666,6 +666,24 @@ fieldset {
 .user-management form button {
   margin-top: 14px;
 }
+.identifier-field label {
+  margin-bottom: 7px;
+}
+.identifier-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.identifier-controls input {
+  flex: 1 1 10rem;
+  width: auto;
+  min-width: 0;
+}
+.identifier-controls button,
+.user-management form .identifier-controls button {
+  margin: 0;
+  padding: 8px 12px;
+}
 .user-actions {
   display: flex;
   gap: 8px;

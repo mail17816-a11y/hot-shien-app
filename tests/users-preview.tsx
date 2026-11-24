@@ -94,6 +94,16 @@ function Preview() {
         currentUserId="admin"
         busy={false}
         onSave={save}
+        onSuggest={async () => {
+          for (let index = 0; index < 1000; index++) {
+            const candidate = `UKMX${String(index).padStart(3, "0")}`;
+            if (
+              !users.some((user) => user.login_id === candidate.toLowerCase())
+            )
+              return candidate;
+          }
+          throw new Error("候補がありません。");
+        }}
       />
     </main>
   );

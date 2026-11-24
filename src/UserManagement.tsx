@@ -1,4 +1,8 @@
 import { useState, type FormEvent } from "react";
+import IdentifierField, {
+  useIdentifierSuggestion,
+  type RegistrationResult,
+} from "./IdentifierField";
 import type { Profile } from "./Timeline";
 export type UserOperation =
   | {
@@ -21,14 +25,17 @@ export default function UserManagement({
   currentUserId,
   busy,
   onSave,
+  onSuggest,
   onContracts,
 }: {
   users: Profile[];
   currentUserId: string;
   busy: boolean;
-  onSave: (operation: UserOperation) => Promise<boolean>;
+  onSave: (operation: UserOperation) => Promise<RegistrationResult>;
+  onSuggest: () => Promise<string>;
   onContracts?: (id: string) => void;
 }) {
+  const loginId = useIdentifierSuggestion(onSuggest);
   const [selected, setSelected] = useState<Profile | null>(null),
     [mode, setMode] = useState<"edit" | "password" | "delete">("edit"),
     [showDeleted, setShowDeleted] = useState(true),
@@ -47,17 +54,20 @@ export default function UserManagement({
   );
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || loginId.pending) return;
     const form = event.currentTarget,
       data = new FormData(form);
-    if (
-      await onSave({
-        action: "create",
-        login_id: String(data.get("login_id")),
-        password: String(data.get("password")),
-        role: String(data.get("role")) as Profile["role"],
-      })
-    )
+    const result = await onSave({
+      action: "create",
+      login_id: String(data.get("login_id")),
+      password: String(data.get("password")),
+      role: String(data.get("role")) as Profile["role"],
+    });
+    if (result === "duplicate") await loginId.handleDuplicate();
+    else if (result) {
       form.reset();
+      loginId.clear();
+    }
   }
   async function edit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -83,7 +93,7 @@ export default function UserManagement({
         user_id: selected.id,
         confirmation: String(data.get("confirmation")),
       };
-    if (await onSave(operation)) setSelected(null);
+    if ((await onSave(operation)) === true) setSelected(null);
   }
   return (
     <section className="user-management">
@@ -96,18 +106,7 @@ export default function UserManagement({
         <form onSubmit={create}>
           <fieldset disabled={busy}>
             <div className="row">
-              <label>
-                ログインID
-                <input
-                  name="login_id"
-                  maxLength={32}
-                  pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,31}"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  autoComplete="off"
-                  required
-                />
-              </label>
+              <IdentifierField kind="user" busy={busy} suggestion={loginId} />
               <label>
                 役割
                 <select name="role" defaultValue="customer">
@@ -133,7 +132,7 @@ export default function UserManagement({
             <small>
               12～128文字。電話・書面で本人確認して案内してください。パスワードは一覧には表示しません。
             </small>
-            <button>ユーザーを登録</button>
+            <button disabled={loginId.pending}>ユーザーを登録</button>
           </fieldset>
         </form>
       </details>
