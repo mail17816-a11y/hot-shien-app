@@ -6,6 +6,7 @@ const actor = "00000000-0000-0000-0000-000000000001",
 const token = `e30.${Buffer.from(JSON.stringify({ iat: 2000000000 })).toString("base64url")}.signature`;
 function fixture(options = {}) {
   const calls = [];
+  const identifierChecks = [];
   const profiles = {
     [actor]: {
       id: actor,
@@ -36,6 +37,8 @@ function fixture(options = {}) {
       admin: {
         createUser: async (body) => {
           calls.push(["create", body]);
+          if (options.createError)
+            return { data: { user: null }, error: options.createError };
           return { data: { user: { id: target } } };
         },
         updateUserById: async (id, body) => {
@@ -51,20 +54,27 @@ function fixture(options = {}) {
         },
       },
     },
-    from: () => {
+    from: (table) => {
       let id;
+      let filter;
       return {
         select() {
           return this;
         },
         eq(field, value) {
           if (field === "id") id = value;
+          else filter = [table, field, value];
           return this;
         },
         single: async () => ({ data: profiles[id] }),
-        maybeSingle: async () => ({
-          data: options.duplicate ? { id: target } : null,
-        }),
+        maybeSingle: async () => {
+          identifierChecks.push(filter);
+          return (
+            options.checkIdentifier?.(filter, identifierChecks.length) ?? {
+              data: options.duplicate ? { id: target } : null,
+            }
+          );
+        },
         order() {
           return this;
         },
@@ -100,7 +110,7 @@ function fixture(options = {}) {
         body: JSON.stringify(body),
       }),
     );
-  return { calls, request };
+  return { calls, identifierChecks, request };
 }
 test("未ログイン・不正JWT・作業者・停止済み・削除済み・失効JWTの管理操作を拒否する", async () => {
   const missing = fixture();
@@ -134,6 +144,65 @@ test("確認済みの内部メールで作成し、初期処理完了までは�
   assert.equal(f.calls[1][2].p_role, "worker");
   assert.equal(f.calls[2][2].ban_duration, "none");
   assert.ok(!(await response.text()).includes("Long-Password"));
+});
+test("使用済みの候補を引き直し、番号の種類に応じた列で照合する", async (t) => {
+  const bytes = [0, 1, 2, 0, 8, 3, 25, 24, 23, 4, 7, 2];
+  for (const [kind, table, column, first, next] of [
+    ["user", "profiles", "login_id", "UABC083", "UZYX472"],
+    ["property", "properties", "property_number", "PABC083", "PZYX472"],
+  ]) {
+    let index = 0;
+    const mock = t.mock.method(crypto, "getRandomValues", (buffer) => {
+      buffer[0] = bytes[index++];
+      return buffer;
+    });
+    const f = fixture({
+      checkIdentifier: (_filter, count) => ({
+        data: count === 1 ? { id: target, deleted_at: "2026-10-18" } : null,
+      }),
+    });
+    const response = await f.request({ action: "suggest_identifier", kind });
+    mock.mock.restore();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { identifier: next });
+    assert.deepEqual(
+      f.identifierChecks,
+      [first, next].map((number) => [
+        table,
+        column,
+        kind === "user" ? number.toLowerCase() : number,
+      ]),
+    );
+    assert.deepEqual(f.calls, []);
+  }
+});
+test("管理者以外や照合に失敗した場合には候補を返さない", async () => {
+  const operation = { action: "suggest_identifier", kind: "property" };
+  const worker = fixture({ actor: { role: "worker" } });
+  assert.equal((await worker.request(operation)).status, 403);
+  assert.equal(worker.identifierChecks.length, 0);
+  const unavailable = fixture({
+    checkIdentifier: () => ({ data: null, error: { code: "offline" } }),
+  });
+  const response = await unavailable.request(operation);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).identifier, undefined);
+});
+test("照合後にログインIDが作成済みになった場合は重複として返す", async () => {
+  const f = fixture({ createError: { code: "email_exists" } });
+  const response = await f.request({
+    action: "create",
+    login_id: "UKMX472",
+    password: "Long-Password-123",
+    role: "customer",
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "duplicate_identifier");
+  assert.deepEqual(f.identifierChecks, [["profiles", "login_id", "ukmx472"]]);
+  assert.deepEqual(
+    f.calls.map(([action]) => action),
+    ["create"],
+  );
 });
 test("氏名などの余分な項目、短いパスワード、重複IDを拒否する", async () => {
   const input = {
