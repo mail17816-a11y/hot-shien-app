@@ -6,18 +6,33 @@ import ExpenseCorrectionHistory, {
 import type { Profile, Property, Report } from "./Timeline";
 import type { Expense } from "./Expenses";
 
+const services = {
+  system: { label: "システム利用料", reportKind: null },
+  patrol: { label: "巡回点検", reportKind: "定期巡回" },
+  light_work: { label: "除草・清掃", reportKind: "除草・清掃" },
+  mail: { label: "郵便物対応", reportKind: "郵便物対応" },
+} as const;
+type ServiceCode = keyof typeof services;
+const monthsOfYear = Array.from({ length: 12 }, (_, index) => index + 1);
+
 export type Contract = {
   id: string;
   customer_id: string;
   property_id: string;
   item: string;
-  amount_yen: number;
-  billing_cycle: "monthly" | "annual" | "once" | "custom";
-  payment_months?: string[];
-  starts_on: string;
-  ends_on: string | null;
+  service_code: ServiceCode;
+  normal_months: number[];
+};
+export type ServiceScheduleMonth = {
+  contract_id: string;
+  period: string;
+  planned: boolean;
+};
+export type ServiceRate = {
+  id: string;
+  service_code: ServiceCode;
   effective_from: string;
-  status: "active" | "ended";
+  amount_yen: number;
 };
 export type Invoice = {
   id: string;
@@ -42,14 +57,6 @@ export type BillingAction = (
   action: string,
   data: Record<string, unknown>,
 ) => Promise<boolean>;
-const presets = [
-  ["システム利用料", 500],
-  ["外周点検（定額）", 3000],
-  ["郵便物画像報告（定額）", 300],
-  ["郵便物転送手数料（定額）", 200],
-  ["除草・清掃（定額）", 3000],
-  ["個別の定額料金", 0],
-] as const;
 export const yen = (amount: number) => `${amount.toLocaleString("ja-JP")}円`;
 export function InvoiceDetails({
   invoice,
@@ -108,108 +115,56 @@ export function InvoiceDetails({
         corrections={corrections.filter((row) => row.invoice_id === invoice.id)}
       />
       <small>
-        登録された合意済み金額の合計です。日割り・税額・季節割増の自動計算は行いません。
+        共通料金と選択した実費の合計です。正式な請求書の割引は台帳で反映します。
       </small>
     </div>
   );
 }
 
-function PaymentSchedule({ contract }: { contract: Contract | null }) {
-  const [cycle, setCycle] = useState(contract?.billing_cycle || "monthly");
-  const [months, setMonths] = useState<string[]>(
-    contract?.payment_months || [],
-  );
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(
-    Number(contract?.payment_months?.[0]?.slice(0, 4)) || currentYear,
-  );
-  const years = [
-    ...new Set([
-      ...Array.from({ length: 21 }, (_, i) => currentYear - 10 + i),
-      ...months.map((month) => Number(month.slice(0, 4))),
-      year,
-    ]),
-  ].sort((a, b) => a - b);
+function ScheduleMonths({
+  initialMonths,
+  year,
+}: {
+  initialMonths: number[];
+  year: number;
+}) {
+  const [selected, setSelected] = useState(initialMonths);
   return (
-    <div className="payment-schedule">
-      <label>
-        支払い周期
-        <select
-          name="billing_cycle"
-          value={cycle}
-          onChange={(e) =>
-            setCycle(e.target.value as Contract["billing_cycle"])
-          }
-        >
-          <option value="monthly">毎月</option>
-          <option value="annual">年1回（適用開始月と同じ月）</option>
-          <option value="once">一回のみ（適用開始月）</option>
-          <option value="custom">カスタム</option>
-        </select>
-      </label>
-      {cycle === "custom" && (
-        <>
-          <label>
-            支払い年
-            <select
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-            >
-              {years.map((value) => (
-                <option key={value} value={value}>
-                  {value}年
-                </option>
-              ))}
-            </select>
-          </label>
-          <div
-            className="payment-months"
-            role="group"
-            aria-label={`${year}年の支払い月`}
+    <>
+      <button
+        type="button"
+        className="quiet"
+        onClick={() => setSelected(selected.length === 12 ? [] : monthsOfYear)}
+      >
+        {selected.length === 12 ? "すべて解除" : "毎月を選択"}
+      </button>
+      <div
+        className="payment-months"
+        role="group"
+        aria-label={`${year}年の提供予定月`}
+      >
+        {monthsOfYear.map((month) => (
+          <button
+            key={month}
+            type="button"
+            className={selected.includes(month) ? "" : "quiet"}
+            aria-pressed={selected.includes(month)}
+            onClick={() =>
+              setSelected(
+                selected.includes(month)
+                  ? selected.filter((value) => value !== month)
+                  : [...selected, month],
+              )
+            }
           >
-            {Array.from({ length: 12 }, (_, i) => {
-              const month = `${year}-${String(i + 1).padStart(2, "0")}-01`;
-              const selected = months.includes(month);
-              return (
-                <button
-                  key={month}
-                  type="button"
-                  className={selected ? "" : "quiet"}
-                  aria-pressed={selected}
-                  onClick={() =>
-                    setMonths(
-                      selected
-                        ? months.filter((value) => value !== month)
-                        : [...months, month].sort(),
-                    )
-                  }
-                >
-                  {i + 1}月
-                </button>
-              );
-            })}
-          </div>
-          <small>
-            選択した年月ごとに、合意済みの請求額を計上します。年を切り替えて複数年を選べます。
-          </small>
-          <p aria-live="polite">
-            選択済み：
-            {months.length
-              ? months.map((month) => month.slice(0, 7)).join("、")
-              : "なし（1か月以上選択してください）"}
-          </p>
-          {months.map((month) => (
-            <input
-              key={month}
-              type="hidden"
-              name="payment_months"
-              value={month}
-            />
-          ))}
-        </>
-      )}
-      {cycle === "once" && <small>料金の適用開始月に1回だけ計上します。</small>}
-    </div>
+            {month}月
+          </button>
+        ))}
+      </div>
+      {selected.map((month) => (
+        <input key={month} type="hidden" name="months" value={month} />
+      ))}
+    </>
   );
 }
 
@@ -217,6 +172,8 @@ export default function Billing({
   users,
   properties,
   contracts,
+  scheduleMonths,
+  rates,
   invoices,
   lines,
   expenses,
@@ -230,6 +187,8 @@ export default function Billing({
   users: Profile[];
   properties: Property[];
   contracts: Contract[];
+  scheduleMonths: ServiceScheduleMonth[];
+  rates: ServiceRate[];
   invoices: Invoice[];
   lines: InvoiceLine[];
   expenses: Expense[];
@@ -242,11 +201,16 @@ export default function Billing({
 }) {
   const [editing, setEditing] = useState<Contract | null>(null);
   const [version, setVersion] = useState(0);
-  const [period, setPeriod] = useState(
-    new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" })
-      .format(new Date())
-      .slice(0, 7),
-  );
+  const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" })
+    .format(new Date())
+    .slice(0, 7);
+  const [year, setYear] = useState(Number(today.slice(0, 4)));
+  const [period, setPeriod] = useState(() => {
+    const [currentYear, month] = today.split("-").map(Number);
+    return new Date(Date.UTC(currentYear, month - 2, 1))
+      .toISOString()
+      .slice(0, 7);
+  });
   const [excluded, setExcluded] = useState<string[]>([]);
   const [confirmPublish, setConfirmPublish] = useState("");
   const [confirmCancel, setConfirmCancel] = useState("");
@@ -281,36 +245,121 @@ export default function Billing({
         report.performed_on.slice(0, 7) <= period &&
         (!expense.billed_at || attached.has(expense.id)),
     );
+  function scheduleForYear(contract: Contract) {
+    return scheduleMonths.filter(
+      (row) =>
+        row.contract_id === contract.id && row.period.startsWith(`${year}-`),
+    );
+  }
+  const savedSchedule = editing ? scheduleForYear(editing) : [];
+  const savedMonths = savedSchedule.length
+    ? savedSchedule
+        .filter((row) => row.planned)
+        .map((row) => Number(row.period.slice(5, 7)))
+    : null;
+
+  const scheduleIssues = period
+    ? ownContracts.flatMap((contract) => {
+        const schedule = scheduleMonths.find(
+          (row) =>
+            row.contract_id === contract.id && row.period === `${period}-01`,
+        );
+        if (!schedule) return [{ contract, message: "提供予定が未登録" }];
+        const kind = services[contract.service_code].reportKind;
+        if (!schedule.planned || !kind) return [];
+        const reported = reports.some(
+          (report) =>
+            report.property_id === contract.property_id &&
+            report.kind === kind &&
+            report.performed_on.startsWith(`${period}-`) &&
+            report.publication_status === "published",
+        );
+        return reported ? [] : [{ contract, message: "実施報告を要確認" }];
+      })
+    : [];
+
   async function saveContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    if (
-      data.get("billing_cycle") === "custom" &&
-      !data.getAll("payment_months").length
-    ) {
-      window.alert("支払い月を1か月以上選択してください。");
-      return;
-    }
     const saved = await onAction("contract", {
       id: editing?.id || "",
       customer_id: customerId,
-      property_id: data.get("property_id"),
-      item: String(data.get("item")).trim(),
-      amount_yen: Number(data.get("amount_yen")),
-      billing_cycle: data.get("billing_cycle"),
-      payment_months: data.getAll("payment_months"),
-      starts_on: data.get("starts_on"),
-      ends_on: data.get("ends_on"),
-      effective_from: `${data.get("effective_from")}-01`,
-      status: data.get("status"),
+      property_id: editing?.property_id ?? data.get("property_id"),
+      service_code: data.get("service_code"),
+      year,
+      months: data.getAll("months").map(Number),
+      expected_months: savedMonths,
+      update_normal: data.has("update_normal"),
     });
     if (saved) {
       setEditing(null);
       setVersion(version + 1);
     }
   }
+
+  async function saveRate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    if (
+      await onAction("rate", {
+        service_code: data.get("service_code"),
+        effective_from: `${data.get("effective_from")}-01`,
+        amount_yen: Number(data.get("amount_yen")),
+      })
+    )
+      form.reset();
+  }
   return (
     <section>
+      <details className="panel">
+        <summary>共通料金表</summary>
+        <form onSubmit={saveRate}>
+          <fieldset disabled={busy}>
+            <div className="row">
+              <label>
+                サービス
+                <select name="service_code">
+                  {Object.entries(services).map(([code, service]) => (
+                    <option key={code} value={code}>
+                      {service.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                適用開始月
+                <input
+                  type="month"
+                  name="effective_from"
+                  defaultValue={period}
+                  required
+                />
+              </label>
+              <label>
+                金額（円）
+                <input
+                  type="number"
+                  name="amount_yen"
+                  min="0"
+                  max="999999999"
+                  step="1"
+                  required
+                />
+              </label>
+            </div>
+            <button>共通料金を保存</button>
+          </fieldset>
+        </form>
+        <ul>
+          {rates.map((rate) => (
+            <li key={rate.id}>
+              {services[rate.service_code].label} ·{" "}
+              {rate.effective_from.slice(0, 7)}分から · {yen(rate.amount_yen)}
+            </li>
+          ))}
+        </ul>
+      </details>
       <label>
         契約者の顧客番号
         <select
@@ -342,145 +391,86 @@ export default function Billing({
       ) : (
         <>
           <section className="panel">
-            <h2>簡易契約・定額料金</h2>
-            <p className="muted">
-              料金表は初期値です。回数や割引を含め、契約で合意した実際の請求額を設定してください。システム利用料も対象物件を1つ指定して登録します。
-            </p>
+            <h2>契約・サービス提供予定</h2>
+            <label>
+              予定の対象年
+              <input
+                type="number"
+                value={year || ""}
+                onChange={(e) => setYear(Number(e.target.value))}
+                min="1900"
+                max="9999"
+                step="1"
+                required
+              />
+            </label>
             <details
               className="property-registration panel"
               open={editing ? true : undefined}
               key={`${editing?.id || "new"}:${version}`}
             >
-              <summary>
-                {editing ? "契約項目を編集" : "契約の料金項目を追加"}
-              </summary>
+              <summary>{editing ? "提供予定を編集" : "契約項目を追加"}</summary>
               <form onSubmit={saveContract}>
                 <fieldset disabled={busy || !ownProperties.length}>
-                  {!editing && (
-                    <label>
-                      料金表から初期値を入力
-                      <select
-                        defaultValue=""
-                        onChange={(e) => {
-                          const preset = presets[Number(e.target.value)];
-                          if (!preset) return;
-                          const form = e.currentTarget.form;
-                          if (!form) return;
-                          (
-                            form.elements.namedItem("item") as HTMLInputElement
-                          ).value = preset[0];
-                          (
-                            form.elements.namedItem(
-                              "amount_yen",
-                            ) as HTMLInputElement
-                          ).value = String(preset[1]);
-                        }}
-                      >
-                        <option value="" disabled>
-                          料金メニューを選択
-                        </option>
-                        {presets.map(([label], index) => (
-                          <option key={label} value={index}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                  {editing ? (
+                    <>
+                      <p>
+                        {
+                          ownProperties.find(
+                            (property) => property.id === editing.property_id,
+                          )?.property_number
+                        }{" "}
+                        · {editing.item}
+                      </p>
+                      {savedMonths === null && (
+                        <p>
+                          この年の予定は未登録です。通常の提供月を初期値にしています。
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="row">
+                      <label>
+                        対象物件
+                        <select name="property_id" required>
+                          {ownProperties.map((property) => (
+                            <option key={property.id} value={property.id}>
+                              {property.property_number}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        サービス
+                        <select name="service_code">
+                          {Object.entries(services).map(([code, service]) => (
+                            <option key={code} value={code}>
+                              {service.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                   )}
-                  <label>
-                    対象物件
-                    <select
-                      name="property_id"
-                      defaultValue={
-                        editing?.property_id || ownProperties[0]?.id
-                      }
-                      disabled={Boolean(editing)}
-                    >
-                      {ownProperties.map((property) => (
-                        <option key={property.id} value={property.id}>
-                          {property.property_number}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <ScheduleMonths
+                    key={year}
+                    initialMonths={savedMonths ?? editing?.normal_months ?? []}
+                    year={year}
+                  />
                   {editing && (
-                    <input
-                      type="hidden"
-                      name="property_id"
-                      value={editing.property_id}
-                    />
+                    <label className="checkbox-label">
+                      <input type="checkbox" name="update_normal" key={year} />
+                      この予定を今後の新しい年の初期値にする
+                    </label>
                   )}
-                  <label>
-                    項目名
-                    <input
-                      name="item"
-                      defaultValue={editing?.item}
-                      maxLength={200}
-                      required
-                    />
-                  </label>
-                  <div className="row">
-                    <label>
-                      合意済みの請求額（円）
-                      <input
-                        type="number"
-                        name="amount_yen"
-                        min="0"
-                        max="999999999"
-                        step="1"
-                        defaultValue={editing?.amount_yen}
-                        required
-                      />
-                    </label>
-                  </div>
-                  <PaymentSchedule contract={editing} />
-                  <div className="row">
-                    <label>
-                      契約開始日
-                      <input
-                        type="date"
-                        name="starts_on"
-                        defaultValue={editing?.starts_on}
-                        required
-                      />
-                    </label>
-                    <label>
-                      契約終了日（任意）
-                      <input
-                        type="date"
-                        name="ends_on"
-                        defaultValue={editing?.ends_on || ""}
-                      />
-                    </label>
-                  </div>
-                  <div className="row">
-                    <label>
-                      料金の適用開始月
-                      <input
-                        type="month"
-                        name="effective_from"
-                        defaultValue={
-                          editing?.effective_from.slice(0, 7) || period
-                        }
-                        required
-                      />
-                    </label>
-                    <label>
-                      契約状態
-                      <select
-                        name="status"
-                        defaultValue={editing?.status || "active"}
-                      >
-                        <option value="active">契約中</option>
-                        <option value="ended">終了（終了日を指定）</option>
-                      </select>
-                    </label>
-                  </div>
-                  <small>
-                    月途中の開始・終了もその月の全額を計上します。年払いは指定月だけ計上します。既存の請求下書きは、自動では変わりません。
-                  </small>
                   <div className="user-actions">
-                    <button>契約項目を保存</button>
+                    <button
+                      disabled={
+                        !Number.isInteger(year) || year < 1900 || year > 9999
+                      }
+                    >
+                      提供予定を保存
+                    </button>
                     {editing && (
                       <button
                         type="button"
@@ -499,62 +489,52 @@ export default function Billing({
             )}
             <div className="inbox-scroll">
               <table className="inbox-table">
-                <caption className="sr-only">契約料金一覧</caption>
+                <caption className="sr-only">契約項目と提供予定</caption>
                 <thead>
                   <tr>
                     <th scope="col">物件番号</th>
-                    <th scope="col">項目</th>
-                    <th scope="col">金額・周期</th>
-                    <th scope="col">期間・適用月</th>
-                    <th scope="col">状態・操作</th>
+                    <th scope="col">サービス</th>
+                    <th scope="col">提供予定月</th>
+                    <th scope="col">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ownContracts.map((contract) => (
-                    <tr key={contract.id}>
-                      <td>
-                        {
-                          properties.find((p) => p.id === contract.property_id)
-                            ?.property_number
-                        }
-                      </td>
-                      <td>{contract.item}</td>
-                      <td>
-                        {yen(contract.amount_yen)} /{" "}
-                        {
+                  {ownContracts.map((contract) => {
+                    const schedule = scheduleForYear(contract);
+                    const planned = schedule.filter((row) => row.planned);
+                    return (
+                      <tr key={contract.id}>
+                        <td>
                           {
-                            monthly: "毎月",
-                            annual: "年1回",
-                            once: "一回のみ",
-                            custom: "カスタム",
-                          }[contract.billing_cycle]
-                        }
-                        {contract.billing_cycle === "custom" && (
-                          <small>
-                            {contract.payment_months
-                              ?.map((month) => month.slice(0, 7))
-                              .join("、")}
-                          </small>
-                        )}
-                      </td>
-                      <td>
-                        {contract.starts_on} ～ {contract.ends_on || "継続"}
-                        <small>
-                          料金適用：{contract.effective_from.slice(0, 7)}から
-                        </small>
-                      </td>
-                      <td>
-                        {contract.status === "active" ? "契約中" : "終了"}
-                        <button
-                          className="quiet"
-                          disabled={busy}
-                          onClick={() => setEditing(contract)}
-                        >
-                          編集
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                            ownProperties.find(
+                              (property) =>
+                                property.id === contract.property_id,
+                            )?.property_number
+                          }
+                        </td>
+                        <td>{contract.item}</td>
+                        <td>
+                          {schedule.length
+                            ? planned
+                                .map(
+                                  (row) =>
+                                    `${Number(row.period.slice(5, 7))}月`,
+                                )
+                                .join("、") || "予定なし"
+                            : "未登録"}
+                        </td>
+                        <td>
+                          <button
+                            className="quiet"
+                            disabled={busy}
+                            onClick={() => setEditing(contract)}
+                          >
+                            編集
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -575,8 +555,22 @@ export default function Billing({
               />
             </label>
             <p>
-              対象月に適用される定額料金を自動で取り込みます。実費は対象月までの未請求分から選択します。
+              対象月の提供予定と公開済みの実施報告をもとに、共通料金を計上します。実費は対象月までの未請求分から選択します。
             </p>
+            {scheduleIssues.length > 0 && (
+              <ul aria-label="請求前の確認事項">
+                {scheduleIssues.map(({ contract, message }) => (
+                  <li key={contract.id}>
+                    {
+                      ownProperties.find(
+                        (property) => property.id === contract.property_id,
+                      )?.property_number
+                    }{" "}
+                    · {contract.item} · {message}
+                  </li>
+                ))}
+              </ul>
+            )}
             {eligible.length > 0 && <BillingNotice />}
             {eligible.map(({ expense, report }) => (
               <label className="checkbox-label" key={expense.id}>

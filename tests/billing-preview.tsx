@@ -1,6 +1,11 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import Billing, { type Invoice, type Contract } from "../src/Billing";
+import Billing, {
+  type Invoice,
+  type Contract,
+  type ServiceRate,
+  type ServiceScheduleMonth,
+} from "../src/Billing";
 import Timeline from "../src/Timeline";
 import "../src/style.css";
 const customer = {
@@ -22,12 +27,8 @@ const sampleContract: Contract = {
   customer_id: customer.id,
   property_id: properties[0].id,
   item: "システム利用料",
-  amount_yen: 500,
-  billing_cycle: "monthly",
-  starts_on: "2026-10-01",
-  ends_on: null,
-  effective_from: "2026-10-01",
-  status: "active",
+  service_code: "system",
+  normal_months: Array.from({ length: 12 }, (_, index) => index + 1),
 };
 const lines = [
   {
@@ -54,6 +55,21 @@ const lines = [
 function Preview() {
   const [mode, setMode] = useState("admin");
   const [contracts, setContracts] = useState([sampleContract]);
+  const [scheduleMonths, setScheduleMonths] = useState<ServiceScheduleMonth[]>(
+    sampleContract.normal_months.map((month) => ({
+      contract_id: sampleContract.id,
+      period: `2026-${String(month).padStart(2, "0")}-01`,
+      planned: true,
+    })),
+  );
+  const [rates, setRates] = useState<ServiceRate[]>([
+    {
+      id: "sample-rate",
+      service_code: "system",
+      effective_from: "2026-10-01",
+      amount_yen: 500,
+    },
+  ]);
   const [invoices, setInvoices] = useState<Invoice[]>([
     {
       id: "sample-invoice",
@@ -78,6 +94,8 @@ function Preview() {
           users={[customer]}
           properties={properties}
           contracts={contracts}
+          scheduleMonths={scheduleMonths}
+          rates={rates}
           invoices={invoices}
           lines={lines}
           expenses={[]}
@@ -107,11 +125,64 @@ function Preview() {
                     : invoice,
                 ),
               );
-            if (action === "contract")
-              setContracts([
-                ...contracts,
-                { ...data, id: "new-sample" } as Contract,
+            if (action === "contract") {
+              const id = String(
+                data.id || `sample-contract-${contracts.length}`,
+              );
+              const months = data.months as number[];
+              const year = String(data.year);
+              if (data.id) {
+                if (data.update_normal) {
+                  setContracts(
+                    contracts.map((contract) =>
+                      contract.id === id
+                        ? { ...contract, normal_months: months }
+                        : contract,
+                    ),
+                  );
+                }
+              } else {
+                const service = data.service_code as Contract["service_code"];
+                const serviceNames = {
+                  system: "システム利用料",
+                  patrol: "巡回点検",
+                  light_work: "除草・清掃",
+                  mail: "郵便物対応",
+                };
+                setContracts([
+                  ...contracts,
+                  {
+                    id,
+                    customer_id: customer.id,
+                    property_id: String(data.property_id),
+                    service_code: service,
+                    item: serviceNames[service],
+                    normal_months: months,
+                  },
+                ]);
+              }
+              setScheduleMonths([
+                ...scheduleMonths.filter(
+                  (row) =>
+                    row.contract_id !== id || !row.period.startsWith(year),
+                ),
+                ...Array.from({ length: 12 }, (_, index) => ({
+                  contract_id: id,
+                  period: `${year}-${String(index + 1).padStart(2, "0")}-01`,
+                  planned: months.includes(index + 1),
+                })),
               ]);
+            }
+            if (action === "rate") {
+              const id = `${data.service_code}/${data.effective_from}`;
+              setRates([
+                { ...data, id } as ServiceRate,
+                ...rates.filter(
+                  (rate) =>
+                    `${rate.service_code}/${rate.effective_from}` !== id,
+                ),
+              ]);
+            }
             return true;
           }}
         />
