@@ -27,6 +27,8 @@ import Billing, {
   type Contract,
   type Invoice,
   type InvoiceLine,
+  type ServiceRate,
+  type ServiceScheduleMonth,
 } from "./Billing";
 import Timeline, {
   type Profile,
@@ -99,6 +101,10 @@ export default function App() {
   const [reportEditorOpen, setReportEditorOpen] = useState(true);
   const [configuringProperty, setConfiguringProperty] = useState("");
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [scheduleMonths, setScheduleMonths] = useState<ServiceScheduleMonth[]>(
+    [],
+  );
+  const [serviceRates, setServiceRates] = useState<ServiceRate[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
   const [billingCustomer, setBillingCustomer] = useState("");
@@ -149,6 +155,8 @@ export default function App() {
       setFocusedReportId("");
       lastReportHash.current = "";
       setContracts([]);
+      setScheduleMonths([]);
+      setServiceRates([]);
       setInvoices([]);
       setInvoiceLines([]);
       setBillingCustomer("");
@@ -263,6 +271,8 @@ export default function App() {
     setReports(hydrated);
     const [
       contractRows,
+      scheduleRows,
+      rateRows,
       invoiceRows,
       lineRows,
       expenseRows,
@@ -275,7 +285,20 @@ export default function App() {
       results,
       revisions,
     ] = await Promise.all([
-      allRows<Contract>("customer_contracts", "created_at"),
+      p.data.role === "admin"
+        ? allRows<Contract>("customer_contracts", "created_at")
+        : [],
+      p.data.role === "admin"
+        ? allRows<ServiceScheduleMonth>(
+            "service_schedule_months",
+            "period",
+            true,
+            ["contract_id"],
+          )
+        : [],
+      p.data.role === "admin"
+        ? allRows<ServiceRate>("service_rates", "effective_from", false)
+        : [],
       allRows<Invoice>("billing_invoices", "period", false),
       allRows<InvoiceLine>("billing_lines", "category", false),
       allRows<Expense>("report_expenses", "created_at", false),
@@ -306,6 +329,8 @@ export default function App() {
     ]);
     if (version !== generation.current) return;
     setContracts(contractRows);
+    setScheduleMonths(scheduleRows);
+    setServiceRates(rateRows);
     setInvoices(invoiceRows);
     setInvoiceLines(lineRows);
     setExpenses(expenseRows);
@@ -1192,6 +1217,8 @@ export default function App() {
                 users={people}
                 properties={properties}
                 contracts={contracts}
+                scheduleMonths={scheduleMonths}
+                rates={serviceRates}
                 invoices={invoices}
                 lines={invoiceLines}
                 invoiceCorrections={invoiceCorrections}
